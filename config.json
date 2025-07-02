@@ -1,0 +1,39 @@
+{
+  "transport": {
+    "type": "stdio",
+    "port": 3000
+  },
+  "context": {
+    "maxTokens": 10000,
+    "defaultLibraries": [],
+    "projectPaths": ["."],
+    "ignorePatterns": [
+      "*.log",
+      "*.tmp", 
+      "node_modules",
+      ".git",
+      "vendor",
+      "bin",
+      "target",
+      "dist",
+      ".next",
+      ".nuxt",
+      "__pycache__",
+      "*.pyc"
+    ],
+    "autoDetectDeps": true,
+    "contextWindowSize": 5000
+  },
+  "cache": {
+    "enabled": true,
+    "directory": "~/.mcp-context/cache",
+    "maxSizeMB": 500,
+    "ttlMinutes": 1440
+  },
+  "memory": {
+    "enabled": true,
+    "storagePath": "~/.mcp-context/memory",
+    "maxSessions": 100,
+    "sessionTTLDays": 30
+  }
+}
