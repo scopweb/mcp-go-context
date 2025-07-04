@@ -1,0 +1,14 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 📚 Manual de Usuario Completo
+    url: https://github.com/scopweb/mcp-go-context/blob/master/MANUAL.md
+    about: Guía completa de uso con ejemplos prácticos
+  - name: 📋 FAQ Collection
+    url: https://github.com/scopweb/mcp-go-context/blob/master/docs/faq/README.md
+    about: Preguntas frecuentes y soluciones comunes
+  - name: 💬 Discussions
+    url: https://github.com/scopweb/mcp-go-context/discussions
+    about: Preguntas generales y discusiones de la comunidad
+  - name: 🐛 Bug Report
+    url: https://github.com/scopweb/mcp-go-context/issues/new?template=bug_report.md
+    about: Reportar un bug o problema técnico
