@@ -135,6 +135,27 @@ Stores important context for future reference with intelligent tagging.
 ### 🔗 `dependency-analysis`
 Analyzes project dependencies with security recommendations.
 
+## 📚 Documentation & Support
+
+### 📖 **[Complete User Manual](./MANUAL.md)**
+Step-by-step guide with practical examples and workflows.
+
+### ❓ **[FAQ Collection](./docs/faq/README.md)**
+Answers to the most common questions and problems:
+
+- **[FAQ #1](./docs/faq/FAQ-01-no-benefits.md)** - "No veo beneficios del MCP después de un día de uso"
+- **[FAQ #2](./docs/faq/FAQ-02-empty-memory.md)** - "¿Por qué está vacía mi carpeta .mcp-context/memory?"
+- **[FAQ #3](./docs/faq/FAQ-03-correct-usage.md)** - "¿Cómo usar las herramientas del MCP correctamente?"
+- **[FAQ #4](./docs/faq/FAQ-04-disconnection.md)** - "El MCP se desconecta después de 60 segundos"
+- **[FAQ #5](./docs/faq/FAQ-05-claude-config.md)** - "¿Cómo configurar correctamente el MCP en Claude Desktop?"
+- **[FAQ #6](./docs/faq/FAQ-06-use-cases.md)** - "¿Cuáles son los casos de uso prácticos del MCP?"
+- **[FAQ #7](./docs/faq/FAQ-07-troubleshooting.md)** - "Troubleshooting: Problemas comunes y soluciones"
+
+### 🆘 **Need Help?**
+1. Check the [FAQ collection](./docs/faq/README.md) first
+2. Search [existing issues](https://github.com/scopweb/mcp-go-context/issues?q=label%3Afaq)
+3. Open a [new issue](https://github.com/scopweb/mcp-go-context/issues/new) if your problem isn't covered
+
 ## 📄 License
 
 MIT License - see [LICENSE](LICENSE) file for details.
