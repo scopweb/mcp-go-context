@@ -340,10 +340,27 @@ Answers to the most common questions and problems:
 2. Search [existing issues](https://github.com/scopweb/mcp-go-context/issues?q=label%3Afaq)
 3. Open a [new issue](https://github.com/scopweb/mcp-go-context/issues/new) if your problem isn't covered
 
+## 🤝 Contributors
+
+This project represents a unique collaboration between human creativity and AI assistance:
+
+### 👨‍💻 [ScopWeb](https://scopweb.com) - Project Lead
+- Original project conception and v1.0.0 development
+- Infrastructure, deployment, and community management
+- Project direction and strategic decisions
+
+### 🤖 Claude (Anthropic AI Assistant) - AI Development Partner
+- v2.0.0 major architecture redesign and implementation
+- JWT authentication system and security enhancements
+- DXT format specification and comprehensive documentation
+- Multi-language support and test suite development
+
+**See [CONTRIBUTORS.md](./CONTRIBUTORS.md) for detailed contribution information.**
+
 ## 📄 License
 
 MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-**Made with ❤️ by [ScopWeb](https://scopweb.com)**
+**Made with ❤️ by [ScopWeb](https://scopweb.com) in collaboration with Claude AI**
