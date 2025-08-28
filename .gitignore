@@ -25,6 +25,7 @@ Thumbs.db
 # Build directories
 /bin/
 /dist/
+/dxt-build/
 
 # Logs
 *.log
@@ -45,9 +46,10 @@ cmd/mcp-context-server/main_minimal*.go
 cmd/mcp-context-server/main_*_standalone.go
 cmd/mcp-context-server/main_fixed.go
 
-# Build scripts (keep only main build.bat)
-build-*.bat
+# Build scripts (keep main build scripts)
 !build.bat
+!build-dxt.bat
+!build-dxt.sh
 compile.bat
 commit-*.bat
 commit-*.sh
@@ -56,12 +58,27 @@ commit-*.sh
 claude-config.json
 config.json
 
-# Documentation (development only)
+# Desktop Extension files
+*.dxt
+
+# JWT and security files
+*.key
+*.pem
+*.crt
+.env
+.env.*
+
+# Documentation (development only) 
 go.md
 ANALISIS_FUNCIONAL.md
 CLAUDE_SETUP.md
 PROJECT_REPORT.md
 CLAUDE_DESKTOP_FIXES.md
+
+# New security and implementation guides (keep)
+!JWT-SECURITY-GUIDE.md
+!CORS-SECURITY-GUIDE.md
+!MCP-2025-UPGRADE-GUIDE.md
 
 # Temporary files
 *.tmp
@@ -73,6 +90,16 @@ cache/
 
 # Context storage (user-specific)
 .mcp-context/
+
+# Test coverage files
+coverage.out
+coverage.html
+*.cover
+
+# Debug and profile files  
+*.prof
+debug*
+profile*
 
 # Cleanup scripts (development only)
 cleanup.bat

@@ -1,0 +1,43 @@
+{
+  "name": "mcp-go-context-dxt",
+  "version": "2.0.0",
+  "description": "Desktop Extension for MCP Go Context Server",
+  "main": "manifest.json",
+  "author": {
+    "name": "ScopWeb",
+    "email": "contact@scopweb.com",
+    "url": "https://scopweb.com"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/scopweb/mcp-go-context",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/scopweb/mcp-go-context.git"
+  },
+  "keywords": [
+    "mcp",
+    "desktop-extension", 
+    "claude-desktop",
+    "context-management",
+    "ai-assistant",
+    "project-analysis",
+    "go"
+  ],
+  "dxt": {
+    "version": "0.1",
+    "type": "executable",
+    "platform": ["win32", "darwin", "linux"],
+    "architecture": ["x64", "arm64"]
+  },
+  "engines": {
+    "claude": ">=3.5.0"
+  },
+  "files": [
+    "manifest.json",
+    "README.md", 
+    "icon.png",
+    "bin/",
+    "screenshots/",
+    "CHANGELOG.md"
+  ]
+}

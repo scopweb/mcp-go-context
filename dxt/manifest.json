@@ -1,0 +1,189 @@
+{
+  "dxt_version": "0.1",
+  "name": "mcp-go-context",
+  "version": "2.0.0", 
+  "description": "Advanced Context Management for AI Coding Assistants - Provides intelligent project analysis, persistent memory, and hybrid documentation fetching",
+  "author": {
+    "name": "ScopWeb",
+    "email": "contact@scopweb.com",
+    "url": "https://scopweb.com"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/scopweb/mcp-go-context",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/scopweb/mcp-go-context"
+  },
+  "keywords": [
+    "mcp",
+    "context",
+    "ai",
+    "coding",
+    "analysis",
+    "memory",
+    "go"
+  ],
+  "server": {
+    "type": "executable",
+    "entry_point": "bin/mcp-context-server.exe",
+    "mcp_config": {
+      "command": "${__dirname}/bin/mcp-context-server.exe",
+      "args": [
+        "--transport", "stdio", 
+        "--verbose"
+      ],
+      "env": {
+        "MCP_JWT_SECRET": "${user_config.jwt_secret}",
+        "MCP_CONFIG_PATH": "${user_config.config_path}"
+      }
+    }
+  },
+  "user_config": {
+    "jwt_secret": {
+      "type": "string",
+      "title": "JWT Secret Key",
+      "description": "Optional JWT secret for HTTP/SSE authentication (leave empty for stdio-only mode)",
+      "sensitive": true,
+      "required": false,
+      "default": ""
+    },
+    "config_path": {
+      "type": "string", 
+      "title": "Configuration File Path",
+      "description": "Optional path to custom configuration file (leave empty for defaults)",
+      "required": false,
+      "default": ""
+    },
+    "project_paths": {
+      "type": "array",
+      "title": "Project Paths",
+      "description": "List of project directories to analyze (comma-separated)",
+      "required": false,
+      "default": ["."]
+    }
+  },
+  "tools": [
+    {
+      "name": "analyze-project",
+      "description": "Analyzes project structure, dependencies, and provides comprehensive context",
+      "category": "analysis"
+    },
+    {
+      "name": "get-context", 
+      "description": "Retrieves relevant context for current task based on files, dependencies, and conversation history",
+      "category": "context"
+    },
+    {
+      "name": "fetch-docs",
+      "description": "Fetches documentation for libraries and dependencies using Context7 API with intelligent fallbacks",
+      "category": "documentation"
+    },
+    {
+      "name": "remember-conversation",
+      "description": "Stores important context from current conversation for future reference with intelligent tagging",
+      "category": "memory"
+    },
+    {
+      "name": "dependency-analysis", 
+      "description": "Analyzes project dependencies with security recommendations",
+      "category": "analysis"
+    },
+    {
+      "name": "memory-get",
+      "description": "Retrieve a memory item by key",
+      "category": "memory"
+    },
+    {
+      "name": "memory-search",
+      "description": "Search memories by query or tags with result limiting",
+      "category": "memory"
+    },
+    {
+      "name": "memory-recent",
+      "description": "Get recent memories with configurable limits",
+      "category": "memory"
+    },
+    {
+      "name": "memory-clear",
+      "description": "Clear all memories (requires confirmation)",
+      "category": "memory"
+    },
+    {
+      "name": "config-get-project-paths",
+      "description": "Get configured project paths",
+      "category": "configuration"
+    },
+    {
+      "name": "auth-generate-token",
+      "description": "Generate JWT token for authentication (development use)",
+      "category": "security"
+    }
+  ],
+  "capabilities": {
+    "tools": {
+      "listChanged": false
+    },
+    "sampling": false,
+    "roots": {
+      "listChanged": false
+    },
+    "resources": {
+      "subscribe": false,
+      "listChanged": false
+    }
+  },
+  "requirements": {
+    "platform": ["win32", "darwin", "linux"],
+    "minimum_claude_version": "3.5",
+    "go_version": "1.21+"
+  },
+  "prompts": [
+    {
+      "name": "analyze-current-project",
+      "description": "Perform comprehensive analysis of the current project",
+      "arguments": [
+        {
+          "name": "depth",
+          "description": "Analysis depth (1-10, default: 3)",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "smart-context-search",
+      "description": "Get intelligent context based on your current task or question",
+      "arguments": [
+        {
+          "name": "query", 
+          "description": "What are you working on or need context for?",
+          "required": true
+        },
+        {
+          "name": "files",
+          "description": "Specific files to include (optional)",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "categories": [
+    "development",
+    "productivity", 
+    "analysis",
+    "documentation"
+  ],
+  "tags": [
+    "project-analysis",
+    "context-management",
+    "memory-persistence", 
+    "documentation-fetching",
+    "go-language",
+    "high-performance"
+  ],
+  "icon": "icon.png",
+  "screenshots": [
+    "screenshots/project-analysis.png",
+    "screenshots/context-retrieval.png", 
+    "screenshots/memory-management.png"
+  ]
+}

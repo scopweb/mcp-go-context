@@ -1,0 +1,58 @@
+{
+  "transport": {
+    "type": "http",
+    "port": 3000
+  },
+  "context": {
+    "maxTokens": 10000,
+    "defaultLibraries": [],
+    "projectPaths": ["."],
+    "ignorePatterns": ["*.log", "*.tmp", "node_modules", ".git", "vendor", "bin", "dist", "target"],
+    "autoDetectDeps": true,
+    "contextWindowSize": 5000
+  },
+  "cache": {
+    "enabled": true,
+    "maxSizeMB": 500,
+    "ttlMinutes": 1440
+  },
+  "memory": {
+    "enabled": true,
+    "persistent": true,
+    "maxEntries": 1000,
+    "maxResults": 10,
+    "sessionTTLDays": 30,
+    "maxSessions": 100
+  },
+  "security": {
+    "auth": {
+      "enabled": true,
+      "method": "jwt",
+      "expiry": "1h",
+      "issuer": "mcp-go-context",
+      "algorithm": "HS256"
+    },
+    "cors": {
+      "enabled": true,
+      "origins": [
+        "https://localhost:3000",
+        "https://localhost:5173", 
+        "app://claude-desktop",
+        "*.yourdomain.com"
+      ],
+      "methods": ["POST", "OPTIONS"],
+      "headers": ["Content-Type", "Authorization"]
+    },
+    "rateLimit": {
+      "enabled": false,
+      "requests": 100,
+      "window": "1m"
+    },
+    "tls": {
+      "enabled": false,
+      "certFile": "cert.pem",
+      "keyFile": "key.pem",
+      "required": false
+    }
+  }
+}

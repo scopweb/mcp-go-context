@@ -4,37 +4,62 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+
+	"github.com/scopweb/mcp-go-context/internal/config"
+	"github.com/scopweb/mcp-go-context/internal/security"
 )
 
 // HTTPTransport implements MCP over HTTP
 type HTTPTransport struct {
-	port   int
-	server *http.Server
+	port       int
+	server     *http.Server
+	corsConfig config.CORSConfig
 }
 
 // NewHTTPTransport creates a new HTTP transport
 func NewHTTPTransport(port int) Transport {
 	return &HTTPTransport{
 		port: port,
+		corsConfig: config.CORSConfig{
+			Enabled: false, // Default to disabled for backward compatibility
+		},
+	}
+}
+
+// NewHTTPTransportWithCORS creates a new HTTP transport with CORS configuration
+func NewHTTPTransportWithCORS(port int, corsConfig config.CORSConfig) Transport {
+	return &HTTPTransport{
+		port:       port,
+		corsConfig: corsConfig,
 	}
 }
 
 // Start begins the HTTP server
 func (t *HTTPTransport) Start(ctx context.Context, info ServerInfo, handler RequestHandler) error {
 	mux := http.NewServeMux()
+	corsMiddleware := security.NewCORSMiddleware(t.corsConfig)
 
 	// MCP endpoint
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		// Handle CORS
+		if !corsMiddleware.SetHeaders(w, r) {
+			log.Printf("CORS rejected origin: %s", r.Header.Get("Origin"))
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+
+		// Handle preflight
+		if r.Method == http.MethodOptions {
+			return // Already handled by CORS middleware
+		}
+
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
-		// Set CORS headers
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		w.Header().Set("Content-Type", "application/json")
 
 		// Read request
@@ -44,8 +69,10 @@ func (t *HTTPTransport) Start(ctx context.Context, info ServerInfo, handler Requ
 			return
 		}
 
+		// Inyectar request en el contexto para auth
+		ctxWithReq := context.WithValue(ctx, "httpRequest", r)
 		// Handle request
-		respData, err := handler(ctx, reqData)
+		respData, err := handler(ctxWithReq, reqData)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -58,10 +85,17 @@ func (t *HTTPTransport) Start(ctx context.Context, info ServerInfo, handler Requ
 
 	// Health check
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		// Handle CORS for health check too
+		corsMiddleware.SetHeaders(w, r)
+		
+		if r.Method == http.MethodOptions {
+			return
+		}
+
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status": "ok",
-			"server": info.Name,
+			"status":  "ok",
+			"server":  info.Name,
 			"version": info.Version,
 		})
 	})

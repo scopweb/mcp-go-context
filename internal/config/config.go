@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // Config represents the server configuration
@@ -12,6 +13,7 @@ type Config struct {
 	Context   ContextConfig   `json:"context"`
 	Cache     CacheConfig     `json:"cache"`
 	Memory    MemoryConfig    `json:"memory"`
+	Security  SecurityConfig  `json:"security"`
 }
 
 // TransportConfig defines transport settings
@@ -49,6 +51,47 @@ type MemoryConfig struct {
 	MaxSessions    int    `json:"maxSessions"`
 }
 
+// SecurityConfig defines security settings
+type SecurityConfig struct {
+	Auth      AuthConfig      `json:"auth"`
+	CORS      CORSConfig      `json:"cors"`
+	RateLimit RateLimitConfig `json:"rateLimit"`
+	TLS       TLSConfig       `json:"tls"`
+}
+
+// AuthConfig defines authentication settings
+type AuthConfig struct {
+	Enabled   bool          `json:"enabled"`
+	Method    string        `json:"method"` // "jwt" or "token"
+	Secret    string        `json:"secret"`
+	Expiry    time.Duration `json:"expiry"`
+	Issuer    string        `json:"issuer"`
+	Algorithm string        `json:"algorithm"`
+}
+
+// CORSConfig defines CORS settings
+type CORSConfig struct {
+	Enabled bool     `json:"enabled"`
+	Origins []string `json:"origins"`
+	Methods []string `json:"methods"`
+	Headers []string `json:"headers"`
+}
+
+// RateLimitConfig defines rate limiting settings
+type RateLimitConfig struct {
+	Enabled  bool          `json:"enabled"`
+	Requests int           `json:"requests"`
+	Window   time.Duration `json:"window"`
+}
+
+// TLSConfig defines TLS settings
+type TLSConfig struct {
+	Enabled  bool   `json:"enabled"`
+	CertFile string `json:"certFile"`
+	KeyFile  string `json:"keyFile"`
+	Required bool   `json:"required"`
+}
+
 // DefaultConfig returns default configuration
 func DefaultConfig() *Config {
 	homeDir, _ := os.UserHomeDir()
@@ -81,6 +124,33 @@ func DefaultConfig() *Config {
 			MaxResults:     10,
 			SessionTTLDays: 30,
 			MaxSessions:    100,
+		},
+		Security: SecurityConfig{
+			Auth: AuthConfig{
+				Enabled:   false,
+				Method:    "jwt",
+				Secret:    "", // Must be set via environment variable
+				Expiry:    time.Hour,
+				Issuer:    "mcp-go-context",
+				Algorithm: "HS256",
+			},
+			CORS: CORSConfig{
+				Enabled: true,
+				Origins: []string{"https://localhost:3000", "app://claude-desktop"},
+				Methods: []string{"POST", "OPTIONS"},
+				Headers: []string{"Content-Type", "Authorization"},
+			},
+			RateLimit: RateLimitConfig{
+				Enabled:  false,
+				Requests: 100,
+				Window:   time.Minute,
+			},
+			TLS: TLSConfig{
+				Enabled:  false,
+				CertFile: "cert.pem",
+				KeyFile:  "key.pem",
+				Required: false,
+			},
 		},
 	}
 }

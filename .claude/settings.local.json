@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Read(C:\\/**)",
+      "Bash(go test:*)",
+      "Bash(del testauth_jwt_test.go)",
+      "Bash(go build:*)",
+      "Bash(.build-dxt.bat)",
+      "Bash(cmd /c:*)",
+      "Bash(chmod:*)",
+      "Bash(./build-dxt.sh:*)",
+      "Bash(./dxt-build/bin/mcp-context-server:*)",
+      "Bash(./mcp-context-server.exe --version)",
+      "Bash(./build-dxt.bat)",
+      "Bash(move:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

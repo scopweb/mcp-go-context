@@ -1,7 +1,36 @@
 # MCP Go Context Server 🚀
 
+## 📝 Changelog
+
+### 2025-08-28 - MCP 2025 Security & Desktop Extensions Update 🚀
+- 🎉 **Desktop Extensions (.dxt)** - One-click installation for Claude Desktop
+- 🔒 **JWT Authentication** - Modern security replacing simple tokens
+- 🛡️ **CORS Configurables** - Secure origin whitelisting (no more wildcard `*`)
+- 🚀 **Streamable HTTP Transport** - MCP 2025-03-26 protocol compliance
+- 📦 **User Configuration** - JWT secrets, config paths with OS keychain
+- ⚙️ **Protocol Upgrade** - Full MCP 2025 capabilities and features
+- 🧪 **Comprehensive Tests** - JWT, CORS, Streamable transport validation
+- 🏗️ **Build Automation** - Cross-platform .dxt package generation
+- ✅ **Backward Compatible** - Existing configurations work unchanged
+
+### 2025-08-15  
+- Refuerzo de seguridad en validación de parámetros y rutas en todos los módulos principales.
+- Mejoras de robustez y control de errores en memory, server y tools.
+- Tests unitarios automáticos para todas las funciones públicas de memoria y tools.
+- Validación estricta de nombres, rutas y argumentos en handlers y API.
+- LRU y control de sesiones en memoria.
+- Restricción de lectura de archivos y límites de tamaño en documentación local.
+- Autenticación opcional por token para transportes HTTP/SSE.
+- Todos los tests en `test/` pasan correctamente.
+- Pruebas de integración para autenticación HTTP/SSE (JSON-RPC) añadidas.
+- Nuevas tools expuestas: `memory-get`, `memory-search`, `memory-recent`, `memory-clear`, `config-get-project-paths`.
+- Documentación de autenticación por token con `MCP_SERVER_TOKEN`.
+
+
 [![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat-square&logo=go)](https://golang.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
+[![MCP](https://img.shields.io/badge/MCP-2025--03--26-blue?style=flat-square)](https://modelcontextprotocol.io/)
+[![DXT](https://img.shields.io/badge/Desktop%20Extensions-✓-green?style=flat-square)](#)
 [![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen?style=flat-square)](#)
 
 > **Advanced Context Management for AI Coding Assistants**  
@@ -29,8 +58,82 @@
 - 🌐 **Hybrid Documentation** - Context7 API + local analysis + fallbacks
 - ⚡ **High Performance** - Local caching and incremental analysis
 - 🔧 **Zero Dependencies** - Single binary, pure Go stdlib
-- 🚀 **Multi-Transport** - stdio, HTTP, and SSE support
+- 🚀 **Multi-Transport** - stdio, HTTP, SSE, and Streamable HTTP support
 - ⚙️ **Highly Configurable** - JSON-based configuration system
+- 🎯 **Desktop Extensions** - One-click installation via .dxt files
+- 🔒 **Enterprise Security** - JWT authentication and CORS protection
+- 📱 **MCP 2025 Ready** - Full protocol compliance with latest features
+
+## 🚀 Installation Methods
+
+### Method 1: Desktop Extension (Recommended) 
+```bash
+1. Download mcp-go-context.dxt
+2. Drag & drop into Claude Desktop
+3. Configure optional settings via UI
+4. Start using tools immediately!
+```
+
+### Method 2: Traditional Installation
+```bash
+# Download release or build from source
+go install github.com/scopweb/mcp-go-context@latest
+
+# Or build from source
+git clone https://github.com/scopweb/mcp-go-context
+cd mcp-go-context
+go build -o mcp-context-server.exe cmd/mcp-context-server/main.go
+```
+
+## ⚙️ Configuration
+
+### For Claude Desktop (stdio - no changes needed)
+```json
+{
+  "mcpServers": {
+    "mcp-go-context": {
+      "command": "C:\\path\\to\\mcp-context-server.exe",
+      "args": ["--transport", "stdio", "--verbose"]
+    }
+  }
+}
+```
+
+### For Advanced HTTP/SSE Usage
+```json
+{
+  "transport": {
+    "type": "streamable-http",
+    "port": 3000
+  },
+  "security": {
+    "auth": {
+      "enabled": true,
+      "method": "jwt",
+      "secret": "${MCP_JWT_SECRET}",
+      "expiry": "1h"
+    },
+    "cors": {
+      "enabled": true,
+      "origins": ["app://claude-desktop", "https://localhost:3000"]
+    }
+  }
+}
+```
+
+## 🔐 Security Features
+
+### JWT Authentication (HTTP/SSE only)
+- **Environment Variable**: `MCP_JWT_SECRET`
+- **Token Generation**: Use `auth-generate-token` tool
+- **Header Format**: `Authorization: Bearer <jwt-token>`
+- **Automatic Expiration**: Configurable (default: 1 hour)
+
+### CORS Protection
+- **Whitelist Origins**: No more wildcard `*` usage
+- **Claude Desktop**: `app://claude-desktop` automatically allowed
+- **Wildcard Patterns**: Support for `*.yourdomain.com`
+- **Preflight Handling**: Full OPTIONS request support
 
 ## 🆚 Why Choose Over Context7?
 
@@ -71,20 +174,28 @@
 - **Persistent**: ✅ Maintains memory across sessions
 - **Fast**: ✅ Local analysis without API calls
 
+## 🛠️ Available Tools (11 Total)
+
+### 📊 Analysis Tools
+- **`analyze-project`** - Comprehensive project analysis with metrics and dependency mapping
+- **`dependency-analysis`** - Project dependency analysis with security recommendations
+- **`config-get-project-paths`** - Get configured project paths
+
+### 🔍 Context & Documentation
+- **`get-context`** - Intelligent context retrieval with memory integration
+- **`fetch-docs`** - Documentation fetching using Context7 API with intelligent fallbacks
+
+### 💭 Memory Management
+- **`remember-conversation`** - Store important context for future reference
+- **`memory-get`** - Retrieve a memory item by key
+- **`memory-search`** - Search memories by text and/or tags with result limits
+- **`memory-recent`** - Get recent memories (configurable limit)
+- **`memory-clear`** - Clear all memories (requires explicit confirmation)
+
+### 🔐 Security & Development
+- **`auth-generate-token`** - Generate JWT tokens for development/testing
+
 ## 🚀 Quick Start
-
-### Installation
-
-**Recommended - Use Fixed Version:**
-```bash
-# Download the latest release
-go install github.com/scopweb/mcp-go-context@latest
-
-# Or build from source (fixed version)
-git clone https://github.com/scopweb/mcp-go-context
-cd mcp-go-context
-go build -o mcp-context-server.exe cmd/mcp-context-server/main.go
-```
 
 ### Configuration for Claude Desktop
 
@@ -134,6 +245,79 @@ Stores important context for future reference with intelligent tagging.
 
 ### 🔗 `dependency-analysis`
 Analyzes project dependencies with security recommendations.
+
+### 🧠 `memory-get`
+Obtiene un ítem de memoria por clave.
+
+Input mínimo:
+```
+{"key":"mi-clave"}
+```
+
+### 🔎 `memory-search`
+Busca memorias por texto y/o etiquetas, con límite de resultados.
+
+Input opcional:
+```
+{"query":"texto","tags":["t1","t2"],"limit":10}
+```
+
+### 🕒 `memory-recent`
+Devuelve memorias recientes (hasta `limit`).
+
+Input opcional:
+```
+{"limit":10}
+```
+
+### ⚠️ `memory-clear`
+Elimina todas las memorias. Requiere confirmación explícita.
+
+Input requerido:
+```
+{"confirm":"YES_I_UNDERSTAND"}
+```
+
+### 🗂️ `config-get-project-paths`
+Lista las rutas de proyecto configuradas actualmente.
+```
+{}
+```
+
+## 🚀 Transport Options
+
+### 📡 Available Transports
+- **`stdio`** - Standard I/O (Claude Desktop default, no auth required)
+- **`http`** - HTTP JSON-RPC (with JWT auth support)
+- **`sse`** - Server-Sent Events (real-time streaming)  
+- **`streamable-http`** - Hybrid HTTP + SSE (MCP 2025-03-26 protocol)
+
+### 🎯 Transport Usage
+```bash
+# Claude Desktop (recommended)
+./mcp-context-server --transport stdio --verbose
+
+# HTTP with authentication  
+./mcp-context-server --transport http --port 3000
+
+# Streamable HTTP (MCP 2025)
+./mcp-context-server --transport streamable-http --port 3000
+```
+
+### 🔧 Protocol Support
+- **MCP Version**: `2025-03-26` (latest)
+- **JSON-RPC**: `2.0` compliant
+- **Capabilities**: Tools, sampling, roots, resources
+- **Security**: JWT authentication, CORS protection
+
+## 🧪 Tests
+
+- **Full Test Suite**: `go test ./...`
+- **JWT Authentication**: `go test ./test -run TestJWTAuthSimple`
+- **CORS Security**: `go test ./test -run TestCORS` 
+- **Streamable Transport**: `go test ./test -run TestStreamable`
+- **Integration Tests**: HTTP/SSE with authentication
+- **Memory & Tools**: Unit tests for all public functions
 
 ## 📚 Documentation & Support
 

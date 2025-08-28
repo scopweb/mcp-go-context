@@ -2,9 +2,11 @@ package memory
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +19,9 @@ type Manager struct {
 	config   config.MemoryConfig
 	sessions map[string]*Session
 	mu       sync.RWMutex
+	// LRU: slice of session IDs ordered by last used (most recent at end)
+	lru []string
+	// index: map[string][]*Memory // Para búsquedas rápidas por tag o palabra clave (futuro)
 }
 
 // Session represents a conversation session
@@ -68,6 +73,25 @@ func (m *Manager) Store(key, content string, tags []string) error {
 		return nil
 	}
 
+	// Validación de clave: solo letras, números, guiones y guiones bajos, 1-64 chars
+	validKey := regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+	if !validKey.MatchString(key) {
+		return errors.New("invalid key format")
+	}
+	// Validación de tags: cada tag igual que key, máximo 10 tags
+	if len(tags) > 10 {
+		return errors.New("too many tags")
+	}
+	for _, tag := range tags {
+		if !validKey.MatchString(tag) {
+			return errors.New("invalid tag format")
+		}
+	}
+	// Validación de contenido: máximo 4096 caracteres
+	if len(content) > 4096 {
+		return errors.New("content too long")
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -83,6 +107,9 @@ func (m *Manager) Store(key, content string, tags []string) error {
 		Usage:     0,
 	}
 
+	// Actualizar LRU
+	m.updateLRU(session.ID)
+
 	// Save to disk
 	return m.saveSession(session)
 }
@@ -93,13 +120,15 @@ func (m *Manager) Retrieve(key string) (*Memory, error) {
 		return nil, fmt.Errorf("memory disabled")
 	}
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	// Search across all sessions
-	for _, session := range m.sessions {
+	// Search across all sessions (mejorable con índice futuro)
+	for id, session := range m.sessions {
 		if memory, exists := session.Memories[key]; exists {
 			memory.Usage++
+			// Actualizar LRU
+			m.updateLRU(id)
 			return &memory, nil
 		}
 	}
@@ -182,6 +211,7 @@ func (m *Manager) Clear() error {
 	defer m.mu.Unlock()
 
 	m.sessions = make(map[string]*Session)
+	m.lru = nil
 
 	// Clear storage
 	storageDir := filepath.Dir(m.config.StoragePath)
@@ -190,8 +220,9 @@ func (m *Manager) Clear() error {
 		return err
 	}
 
+	validFile := regexp.MustCompile(`^[a-zA-Z0-9_-]+\.json$`)
 	for _, entry := range entries {
-		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".json" {
+		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".json" && validFile.MatchString(entry.Name()) {
 			os.Remove(filepath.Join(storageDir, entry.Name()))
 		}
 	}
@@ -202,12 +233,29 @@ func (m *Manager) Clear() error {
 // Private methods
 
 func (m *Manager) getCurrentSession() *Session {
-	// Simple implementation: use a single "current" session
+	// Simple: usar una sola sesión "current" (mejorable para multiusuario)
 	sessionID := "current"
 
 	if session, exists := m.sessions[sessionID]; exists {
 		session.LastUsed = time.Now()
+		m.updateLRU(sessionID)
 		return session
+	}
+
+	// Carga bajo demanda si existe en disco
+	storageDir := filepath.Dir(m.config.StoragePath)
+	filename := filepath.Join(storageDir, sessionID+".json")
+	if _, err := os.Stat(filename); err == nil {
+		data, err := os.ReadFile(filename)
+		if err == nil {
+			var session Session
+			if json.Unmarshal(data, &session) == nil {
+				m.sessions[sessionID] = &session
+				m.updateLRU(sessionID)
+				session.LastUsed = time.Now()
+				return &session
+			}
+		}
 	}
 
 	session := &Session{
@@ -216,14 +264,37 @@ func (m *Manager) getCurrentSession() *Session {
 		LastUsed:  time.Now(),
 		Memories:  make(map[string]Memory),
 	}
-
 	m.sessions[sessionID] = session
+	m.updateLRU(sessionID)
 	return session
+}
+
+// updateLRU actualiza la lista LRU de sesiones
+func (m *Manager) updateLRU(sessionID string) {
+	// Elimina si ya existe
+	for i, id := range m.lru {
+		if id == sessionID {
+			m.lru = append(m.lru[:i], m.lru[i+1:]...)
+			break
+		}
+	}
+	// Añade al final
+	m.lru = append(m.lru, sessionID)
+	// Limita tamaño
+	if m.config.MaxSessions > 0 && len(m.lru) > m.config.MaxSessions {
+		// Elimina la menos reciente
+		removeID := m.lru[0]
+		m.lru = m.lru[1:]
+		delete(m.sessions, removeID)
+		storageDir := filepath.Dir(m.config.StoragePath)
+		filename := filepath.Join(storageDir, removeID+".json")
+		os.Remove(filename)
+	}
 }
 
 func (m *Manager) loadSessions() error {
 	storageDir := filepath.Dir(m.config.StoragePath)
-	
+
 	entries, err := os.ReadDir(storageDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -279,18 +350,19 @@ func (m *Manager) cleanup() {
 
 	cutoff := time.Now().AddDate(0, 0, -m.config.SessionTTLDays)
 	storageDir := filepath.Dir(m.config.StoragePath)
+	validFile := regexp.MustCompile(`^[a-zA-Z0-9_-]+\.json$`)
 
 	for id, session := range m.sessions {
 		if session.LastUsed.Before(cutoff) {
 			delete(m.sessions, id)
-			os.Remove(filepath.Join(storageDir, id+".json"))
+			filename := filepath.Join(storageDir, id+".json")
+			if validFile.MatchString(id + ".json") {
+				os.Remove(filename)
+			}
 		}
 	}
 
-	// Limit total sessions
-	if len(m.sessions) > m.config.MaxSessions {
-		// TODO: Implement LRU eviction
-	}
+	// LRU eviction ya se maneja en updateLRU
 }
 
 func contains(s, substr string) bool {

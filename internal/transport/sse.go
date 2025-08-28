@@ -5,17 +5,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/scopweb/mcp-go-context/internal/config"
+	"github.com/scopweb/mcp-go-context/internal/security"
 )
 
 // SSETransport implements MCP over Server-Sent Events
 type SSETransport struct {
-	port     int
-	server   *http.Server
-	sessions map[string]*sseSession
-	mu       sync.RWMutex
+	port       int
+	server     *http.Server
+	sessions   map[string]*sseSession
+	mu         sync.RWMutex
+	corsConfig config.CORSConfig
 }
 
 type sseSession struct {
@@ -31,20 +36,39 @@ func NewSSETransport(port int) Transport {
 	return &SSETransport{
 		port:     port,
 		sessions: make(map[string]*sseSession),
+		corsConfig: config.CORSConfig{
+			Enabled: false, // Default to disabled for backward compatibility
+		},
+	}
+}
+
+// NewSSETransportWithCORS creates a new SSE transport with CORS configuration
+func NewSSETransportWithCORS(port int, corsConfig config.CORSConfig) Transport {
+	return &SSETransport{
+		port:       port,
+		sessions:   make(map[string]*sseSession),
+		corsConfig: corsConfig,
 	}
 }
 
 // Start begins the SSE server
 func (s *SSETransport) Start(ctx context.Context, info ServerInfo, handler RequestHandler) error {
 	mux := http.NewServeMux()
+	corsMiddleware := security.NewCORSMiddleware(s.corsConfig)
 
 	// SSE endpoint for establishing connection
 	mux.HandleFunc("/sse", func(w http.ResponseWriter, r *http.Request) {
+		// Handle CORS
+		if !corsMiddleware.SetHeaders(w, r) {
+			log.Printf("CORS rejected origin for SSE: %s", r.Header.Get("Origin"))
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+
 		// Set headers for SSE
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -102,13 +126,15 @@ func (s *SSETransport) Start(ctx context.Context, info ServerInfo, handler Reque
 
 	// Message endpoint for receiving commands
 	mux.HandleFunc("/messages", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		// Handle CORS
+		if !corsMiddleware.SetHeaders(w, r) {
+			log.Printf("CORS rejected origin for messages: %s", r.Header.Get("Origin"))
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
 
 		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
+			return // Already handled by CORS middleware
 		}
 
 		if r.Method != "POST" {
@@ -141,9 +167,10 @@ func (s *SSETransport) Start(ctx context.Context, info ServerInfo, handler Reque
 		}
 		defer r.Body.Close()
 
-		// Handle request
-		go func() {
-			response, err := handler(context.Background(), json.RawMessage(body))
+		// Handle request: inyectar request en contexto para auth
+		go func(r *http.Request) {
+			ctxWithReq := context.WithValue(r.Context(), "httpRequest", r)
+			response, err := handler(ctxWithReq, json.RawMessage(body))
 			if err != nil {
 				errorResp, _ := json.Marshal(map[string]interface{}{
 					"type": "error",
@@ -160,7 +187,7 @@ func (s *SSETransport) Start(ctx context.Context, info ServerInfo, handler Reque
 				})
 				session.messages <- responseMsg
 			}
-		}()
+		}(r)
 
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
