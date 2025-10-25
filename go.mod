@@ -1,3 +1,3 @@
 module github.com/scopweb/mcp-go-context
 
-go 1.21
+go 1.23

@@ -27,7 +27,7 @@
 - Documentación de autenticación por token con `MCP_SERVER_TOKEN`.
 
 
-[![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat-square&logo=go)](https://golang.org/)
+[![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat-square&logo=go)](https://golang.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-2025--03--26-blue?style=flat-square)](https://modelcontextprotocol.io/)
 [![DXT](https://img.shields.io/badge/Desktop%20Extensions-✓-green?style=flat-square)](#)
@@ -321,7 +321,7 @@ Lista las rutas de proyecto configuradas actualmente.
 
 ## 📚 Documentation & Support
 
-### 📖 **[Complete User Manual](./MANUAL.md)**
+### 📖 **[Complete User Manual](./docs/MANUAL.md)**
 Step-by-step guide with practical examples and workflows.
 
 ### ❓ **[FAQ Collection](./docs/faq/README.md)**
@@ -355,7 +355,16 @@ This project represents a unique collaboration between human creativity and AI a
 - DXT format specification and comprehensive documentation
 - Multi-language support and test suite development
 
-**See [CONTRIBUTORS.md](./CONTRIBUTORS.md) for detailed contribution information.**
+**See [CONTRIBUTORS.md](./docs/CONTRIBUTORS.md) for detailed contribution information.**
+
+## 📚 Additional Documentation
+
+- **[Performance Optimizations](./docs/OPTIMIZATIONS.md)** - Applied optimizations and benchmarks
+- **[JWT Security Guide](./docs/JWT-SECURITY-GUIDE.md)** - JWT authentication setup and best practices
+- **[CORS Configuration](./docs/CORS-SECURITY-GUIDE.md)** - CORS security configuration guide
+- **[MCP 2025 Upgrade Guide](./docs/MCP-2025-UPGRADE-GUIDE.md)** - Protocol upgrade information
+- **[Contributing Guidelines](./docs/CONTRIBUTING.md)** - How to contribute to the project
+- **[Project Report](./docs/PROJECT_REPORT.md)** - Detailed project analysis and architecture
 
 ## 📄 License
 

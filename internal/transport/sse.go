@@ -159,8 +159,9 @@ func (s *SSETransport) Start(ctx context.Context, info ServerInfo, handler Reque
 			return
 		}
 
-		// Read request
-		body, err := io.ReadAll(r.Body)
+		// Read request with size limit (10MB max)
+		limitedReader := io.LimitReader(r.Body, 10*1024*1024)
+		body, err := io.ReadAll(limitedReader)
 		if err != nil {
 			http.Error(w, "Failed to read request", http.StatusBadRequest)
 			return

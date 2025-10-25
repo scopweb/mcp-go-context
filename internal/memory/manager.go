@@ -14,6 +14,12 @@ import (
 	"github.com/scopweb/mcp-go-context/internal/config"
 )
 
+// Pre-compiled regexes for performance
+var (
+	validKeyRegex  = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+	validFileRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]+\.json$`)
+)
+
 // Manager handles conversation memory persistence
 type Manager struct {
 	config   config.MemoryConfig
@@ -74,8 +80,7 @@ func (m *Manager) Store(key, content string, tags []string) error {
 	}
 
 	// Validación de clave: solo letras, números, guiones y guiones bajos, 1-64 chars
-	validKey := regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
-	if !validKey.MatchString(key) {
+	if !validKeyRegex.MatchString(key) {
 		return errors.New("invalid key format")
 	}
 	// Validación de tags: cada tag igual que key, máximo 10 tags
@@ -83,7 +88,7 @@ func (m *Manager) Store(key, content string, tags []string) error {
 		return errors.New("too many tags")
 	}
 	for _, tag := range tags {
-		if !validKey.MatchString(tag) {
+		if !validKeyRegex.MatchString(tag) {
 			return errors.New("invalid tag format")
 		}
 	}
@@ -220,9 +225,8 @@ func (m *Manager) Clear() error {
 		return err
 	}
 
-	validFile := regexp.MustCompile(`^[a-zA-Z0-9_-]+\.json$`)
 	for _, entry := range entries {
-		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".json" && validFile.MatchString(entry.Name()) {
+		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".json" && validFileRegex.MatchString(entry.Name()) {
 			os.Remove(filepath.Join(storageDir, entry.Name()))
 		}
 	}
@@ -350,13 +354,12 @@ func (m *Manager) cleanup() {
 
 	cutoff := time.Now().AddDate(0, 0, -m.config.SessionTTLDays)
 	storageDir := filepath.Dir(m.config.StoragePath)
-	validFile := regexp.MustCompile(`^[a-zA-Z0-9_-]+\.json$`)
 
 	for id, session := range m.sessions {
 		if session.LastUsed.Before(cutoff) {
 			delete(m.sessions, id)
 			filename := filepath.Join(storageDir, id+".json")
-			if validFile.MatchString(id + ".json") {
+			if validFileRegex.MatchString(id + ".json") {
 				os.Remove(filename)
 			}
 		}

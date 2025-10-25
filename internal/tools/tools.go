@@ -17,6 +17,33 @@ import (
 	"github.com/scopweb/mcp-go-context/internal/memory"
 )
 
+// Pre-compiled regexes for performance
+var (
+	validLibraryName = regexp.MustCompile(`^[a-zA-Z0-9_.-]{1,64}$`)
+
+	// Query analysis patterns
+	patternDebug       = regexp.MustCompile(`error|bug|fix|debug`)
+	patternTest        = regexp.MustCompile(`test|testing|unit`)
+	patternAPI         = regexp.MustCompile(`api|endpoint|route|handler`)
+	patternDatabase    = regexp.MustCompile(`database|db|sql|query`)
+	patternConfig      = regexp.MustCompile(`config|configuration|setting`)
+	patternDeploy      = regexp.MustCompile(`deploy|deployment|docker`)
+	patternSecurity    = regexp.MustCompile(`security|auth|permission`)
+	patternPerformance = regexp.MustCompile(`performance|optimize|slow`)
+
+	// Tag generation patterns
+	tagBug         = regexp.MustCompile(`error|bug|issue|problem`)
+	tagTest        = regexp.MustCompile(`test|testing|spec`)
+	tagConfig      = regexp.MustCompile(`config|configuration`)
+	tagAPI         = regexp.MustCompile(`api|endpoint|route`)
+	tagDatabase    = regexp.MustCompile(`database|db|sql`)
+	tagDeploy      = regexp.MustCompile(`deploy|deployment`)
+	tagSecurity    = regexp.MustCompile(`security|auth`)
+	tagPerformance = regexp.MustCompile(`performance|optimize`)
+	tagFeature     = regexp.MustCompile(`feature|functionality`)
+	tagDocs        = regexp.MustCompile(`documentation|docs`)
+)
+
 // Type aliases to match the actual implementation types
 type Dependency = analyzer.Dependency
 type Memory = memory.Memory
@@ -117,25 +144,25 @@ func AnalyzeProjectHandler(args json.RawMessage, server interface{}) (interface{
 
 	// Format comprehensive response
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("# Project Analysis: %s\n\n", structure.RootPath))
+	fmt.Fprintf(&result, "# Project Analysis: %s\n\n", structure.RootPath)
 
 	// Stats summary
 	result.WriteString("## 📊 Project Statistics\n")
-	result.WriteString(fmt.Sprintf("- **Total Files**: %d\n", structure.Stats.TotalFiles))
-	result.WriteString(fmt.Sprintf("- **Total Size**: %.2f MB\n", float64(structure.Stats.TotalSize)/(1024*1024)))
+	fmt.Fprintf(&result, "- **Total Files**: %d\n", structure.Stats.TotalFiles)
+	fmt.Fprintf(&result, "- **Total Size**: %.2f MB\n", float64(structure.Stats.TotalSize)/(1024*1024))
 
 	// Languages breakdown
 	result.WriteString("\n### Languages Distribution\n")
 	for lang, count := range structure.Stats.Languages {
 		percentage := float64(count) / float64(structure.Stats.TotalFiles) * 100
-		result.WriteString(fmt.Sprintf("- **%s**: %d files (%.1f%%)\n", lang, count, percentage))
+		fmt.Fprintf(&result, "- **%s**: %d files (%.1f%%)\n", lang, count, percentage)
 	}
 
 	// Directory structure
 	result.WriteString("\n## 📁 Directory Structure\n")
 	for dir, files := range structure.Structure {
 		if len(files) > 0 {
-			result.WriteString(fmt.Sprintf("- `%s/` (%d files)\n", dir, len(files)))
+			fmt.Fprintf(&result, "- `%s/` (%d files)\n", dir, len(files))
 		}
 	}
 
@@ -151,15 +178,15 @@ func AnalyzeProjectHandler(args json.RawMessage, server interface{}) (interface{
 				indirectDeps++
 			}
 		}
-		result.WriteString(fmt.Sprintf("- **Direct**: %d dependencies\n", directDeps))
-		result.WriteString(fmt.Sprintf("- **Indirect**: %d dependencies\n", indirectDeps))
+		fmt.Fprintf(&result, "- **Direct**: %d dependencies\n", directDeps)
+		fmt.Fprintf(&result, "- **Indirect**: %d dependencies\n", indirectDeps)
 
 		// Show top dependencies
 		result.WriteString("\n### Key Dependencies\n")
 		count := 0
 		for _, dep := range structure.Dependencies {
 			if dep.Type == "direct" && count < 10 {
-				result.WriteString(fmt.Sprintf("- `%s` %s\n", dep.Name, dep.Version))
+				fmt.Fprintf(&result, "- `%s` %s\n", dep.Name, dep.Version)
 				count++
 			}
 		}
@@ -170,8 +197,8 @@ func AnalyzeProjectHandler(args json.RawMessage, server interface{}) (interface{
 	keyFiles := findKeyFiles(structure.Files)
 	for _, file := range keyFiles {
 		relPath, _ := filepath.Rel(structure.RootPath, file.Path)
-		result.WriteString(fmt.Sprintf("- `%s` (%s, %.2f KB)\n",
-			relPath, file.Language, float64(file.Size)/1024))
+		fmt.Fprintf(&result, "- `%s` (%s, %.2f KB)\n",
+			relPath, file.Language, float64(file.Size)/1024)
 	}
 
 	return []map[string]interface{}{
@@ -207,7 +234,7 @@ func GetContextHandler(args json.RawMessage, server interface{}) (interface{}, e
 	memory := srv.GetMemory()
 
 	var context strings.Builder
-	context.WriteString(fmt.Sprintf("# Context for: %s\n\n", params.Query))
+	fmt.Fprintf(&context, "# Context for: %s\n\n", params.Query)
 
 	// Add relevant memory
 	if memory != nil {
@@ -218,7 +245,7 @@ func GetContextHandler(args json.RawMessage, server interface{}) (interface{}, e
 				if i >= 3 {
 					break
 				}
-				context.WriteString(fmt.Sprintf("**%s**: %s\n\n", mem.Key, mem.Content))
+				fmt.Fprintf(&context, "**%s**: %s\n\n", mem.Key, mem.Content)
 			}
 		}
 	}
@@ -259,8 +286,7 @@ func FetchDocsHandler(args json.RawMessage, server interface{}) (interface{}, er
 		return nil, fmt.Errorf("invalid parameters: %w", err)
 	}
 	// Validar nombre de librería: solo letras, números, guiones, puntos y guiones bajos
-	validLib := regexp.MustCompile(`^[a-zA-Z0-9_.-]{1,64}$`)
-	if !validLib.MatchString(params.Library) {
+	if !validLibraryName.MatchString(params.Library) {
 		return createErrorResponse("Invalid library name")
 	}
 	if len(params.Version) > 32 {
@@ -390,13 +416,13 @@ func DependencyAnalysisHandler(args json.RawMessage, server interface{}) (interf
 	}
 
 	// Direct dependencies
-	result.WriteString(fmt.Sprintf("## Direct Dependencies (%d)\n\n", len(directDeps)))
+	fmt.Fprintf(&result, "## Direct Dependencies (%d)\n\n", len(directDeps))
 	for _, dep := range directDeps {
-		result.WriteString(fmt.Sprintf("- **%s** `%s`", dep.Name, dep.Version))
+		fmt.Fprintf(&result, "- **%s** `%s`", dep.Name, dep.Version)
 		if params.SuggestDocs {
 			docSuggestion := suggestDocumentation(dep.Name)
 			if docSuggestion != "" {
-				result.WriteString(fmt.Sprintf(" - [📚 Docs](%s)", docSuggestion))
+				fmt.Fprintf(&result, " - [📚 Docs](%s)", docSuggestion)
 			}
 		}
 		result.WriteString("\n")
@@ -404,14 +430,14 @@ func DependencyAnalysisHandler(args json.RawMessage, server interface{}) (interf
 
 	// Indirect dependencies if requested
 	if params.IncludeTransitive && len(indirectDeps) > 0 {
-		result.WriteString(fmt.Sprintf("\n## Indirect Dependencies (%d)\n\n", len(indirectDeps)))
+		fmt.Fprintf(&result, "\n## Indirect Dependencies (%d)\n\n", len(indirectDeps))
 		// Show only first 20 to avoid clutter
 		displayCount := min(20, len(indirectDeps))
 		for i, dep := range indirectDeps[:displayCount] {
-			result.WriteString(fmt.Sprintf("%d. %s `%s`\n", i+1, dep.Name, dep.Version))
+			fmt.Fprintf(&result, "%d. %s `%s`\n", i+1, dep.Name, dep.Version)
 		}
 		if len(indirectDeps) > 20 {
-			result.WriteString(fmt.Sprintf("\n... and %d more indirect dependencies\n", len(indirectDeps)-20))
+			fmt.Fprintf(&result, "\n... and %d more indirect dependencies\n", len(indirectDeps)-20)
 		}
 	}
 
@@ -471,22 +497,30 @@ func findKeyFiles(files []*FileInfo) []*FileInfo {
 func analyzeQuery(query string) string {
 	query = strings.ToLower(query)
 
-	// Pattern matching for different query types
-	patterns := map[string]string{
-		"error|bug|fix|debug":          "🐛 Debugging context - Look for error handling, logs, and related functions",
-		"test|testing|unit":            "🧪 Testing context - Focus on test files and testing utilities",
-		"api|endpoint|route|handler":   "🌐 API context - Examine route handlers and API definitions",
-		"database|db|sql|query":        "💾 Database context - Check database models and queries",
-		"config|configuration|setting": "⚙️ Configuration context - Look at config files and environment setup",
-		"deploy|deployment|docker":     "🚀 Deployment context - Focus on deployment and infrastructure files",
-		"security|auth|permission":     "🔒 Security context - Examine authentication and authorization code",
-		"performance|optimize|slow":    "⚡ Performance context - Look for bottlenecks and optimization opportunities",
+	// Pattern matching for different query types using pre-compiled regexes
+	if patternDebug.MatchString(query) {
+		return "🐛 Debugging context - Look for error handling, logs, and related functions\n"
 	}
-
-	for pattern, description := range patterns {
-		if matched, _ := regexp.MatchString(pattern, query); matched {
-			return description + "\n"
-		}
+	if patternTest.MatchString(query) {
+		return "🧪 Testing context - Focus on test files and testing utilities\n"
+	}
+	if patternAPI.MatchString(query) {
+		return "🌐 API context - Examine route handlers and API definitions\n"
+	}
+	if patternDatabase.MatchString(query) {
+		return "💾 Database context - Check database models and queries\n"
+	}
+	if patternConfig.MatchString(query) {
+		return "⚙️ Configuration context - Look at config files and environment setup\n"
+	}
+	if patternDeploy.MatchString(query) {
+		return "🚀 Deployment context - Focus on deployment and infrastructure files\n"
+	}
+	if patternSecurity.MatchString(query) {
+		return "🔒 Security context - Examine authentication and authorization code\n"
+	}
+	if patternPerformance.MatchString(query) {
+		return "⚡ Performance context - Look for bottlenecks and optimization opportunities\n"
 	}
 
 	return ""
@@ -552,7 +586,7 @@ func MemorySearchHandler(args json.RawMessage, server interface{}) (interface{},
 	var b strings.Builder
 	b.WriteString("# Memory Search Results\n\n")
 	for _, m := range found {
-		b.WriteString(fmt.Sprintf("- %s: %s\n", m.Key, m.Content))
+		fmt.Fprintf(&b, "- %s: %s\n", m.Key, m.Content)
 	}
 	return []map[string]interface{}{{
 		"type": "text",
@@ -586,7 +620,7 @@ func MemoryRecentHandler(args json.RawMessage, server interface{}) (interface{},
 	var b strings.Builder
 	b.WriteString("# Recent Memories\n\n")
 	for _, m := range list {
-		b.WriteString(fmt.Sprintf("- %s: %s\n", m.Key, m.Content))
+		fmt.Fprintf(&b, "- %s: %s\n", m.Key, m.Content)
 	}
 	return []map[string]interface{}{{
 		"type": "text",
@@ -649,17 +683,16 @@ func fetchFromContext7(library, version, topic string, tokens int) (string, erro
 	baseURL := "https://context7.com/api/v1"
 	var url string
 
-	validLib := regexp.MustCompile(`^[a-zA-Z0-9_.-]{1,64}$`)
-	if !validLib.MatchString(library) {
+	if !validLibraryName.MatchString(library) {
 		return "", fmt.Errorf("invalid library name")
 	}
-	if library != "" {
-		url = fmt.Sprintf("%s/%s", baseURL, library)
-		if version != "" {
-			url = fmt.Sprintf("%s/%s", url, version)
-		}
-	} else {
+	if library == "" {
 		return "", fmt.Errorf("library name required")
+	}
+
+	url = fmt.Sprintf("%s/%s", baseURL, library)
+	if version != "" {
+		url = fmt.Sprintf("%s/%s", url, version)
 	}
 
 	// Add query parameters
@@ -689,7 +722,9 @@ func fetchFromContext7(library, version, topic string, tokens int) (string, erro
 		return "", fmt.Errorf("API returned status %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	// Limit response size to 5MB to prevent memory issues
+	limitedReader := io.LimitReader(resp.Body, 5*1024*1024)
+	body, err := io.ReadAll(limitedReader)
 	if err != nil {
 		return "", err
 	}
@@ -750,7 +785,9 @@ func searchInPath(path, library, topic string) string {
 		if stat.Size() > 1024*1024 { // 1MB máx
 			return ""
 		}
-		content, err := io.ReadAll(file)
+		// Use LimitReader to prevent reading excessive data
+		limitedReader := io.LimitReader(file, 1024*1024)
+		content, err := io.ReadAll(limitedReader)
 		if err == nil {
 			contentStr := string(content)
 			if strings.Contains(strings.ToLower(contentStr), strings.ToLower(library)) {
@@ -796,24 +833,36 @@ func generateTags(content string) []string {
 	content = strings.ToLower(content)
 	tags := []string{}
 
-	// Common tag patterns
-	tagPatterns := map[string]string{
-		"error|bug|issue|problem": "bug",
-		"test|testing|spec":       "testing",
-		"config|configuration":    "config",
-		"api|endpoint|route":      "api",
-		"database|db|sql":         "database",
-		"deploy|deployment":       "deployment",
-		"security|auth":           "security",
-		"performance|optimize":    "performance",
-		"feature|functionality":   "feature",
-		"documentation|docs":      "docs",
+	// Common tag patterns using pre-compiled regexes
+	if tagBug.MatchString(content) {
+		tags = append(tags, "bug")
 	}
-
-	for pattern, tag := range tagPatterns {
-		if matched, _ := regexp.MatchString(pattern, content); matched {
-			tags = append(tags, tag)
-		}
+	if tagTest.MatchString(content) {
+		tags = append(tags, "testing")
+	}
+	if tagConfig.MatchString(content) {
+		tags = append(tags, "config")
+	}
+	if tagAPI.MatchString(content) {
+		tags = append(tags, "api")
+	}
+	if tagDatabase.MatchString(content) {
+		tags = append(tags, "database")
+	}
+	if tagDeploy.MatchString(content) {
+		tags = append(tags, "deployment")
+	}
+	if tagSecurity.MatchString(content) {
+		tags = append(tags, "security")
+	}
+	if tagPerformance.MatchString(content) {
+		tags = append(tags, "performance")
+	}
+	if tagFeature.MatchString(content) {
+		tags = append(tags, "feature")
+	}
+	if tagDocs.MatchString(content) {
+		tags = append(tags, "docs")
 	}
 
 	if len(tags) == 0 {

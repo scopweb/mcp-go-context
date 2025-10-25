@@ -8,8 +8,11 @@
 # Test binary, built with `go test -c`
 *.test
 
-# Output of the go coverage tool, specifically when used with LiteIDE
+# Output of the go coverage tool
 *.out
+coverage.out
+coverage.html
+*.cover
 
 # Go workspace file
 go.work
@@ -17,6 +20,9 @@ go.work
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
 # OS
 .DS_Store
@@ -33,32 +39,7 @@ Thumbs.db
 # Backup files
 *.backup
 
-# Test files (development only)
-test-*.go
-test_*.go
-test-*.bat
-test-*.sh
-test-*.json
-
-# Development files
-cmd/mcp-context-server/main_debug*.go
-cmd/mcp-context-server/main_minimal*.go
-cmd/mcp-context-server/main_*_standalone.go
-cmd/mcp-context-server/main_fixed.go
-
-# Build scripts (keep main build scripts)
-!build.bat
-!build-dxt.bat
-!build-dxt.sh
-compile.bat
-commit-*.bat
-commit-*.sh
-
-# Config files (development only)
-claude-config.json
-config.json
-
-# Desktop Extension files
+# Desktop Extension files (generated)
 *.dxt
 
 # JWT and security files
@@ -68,21 +49,10 @@ config.json
 .env
 .env.*
 
-# Documentation (development only) 
-go.md
-ANALISIS_FUNCIONAL.md
-CLAUDE_SETUP.md
-PROJECT_REPORT.md
-CLAUDE_DESKTOP_FIXES.md
-
-# New security and implementation guides (keep)
-!JWT-SECURITY-GUIDE.md
-!CORS-SECURITY-GUIDE.md
-!MCP-2025-UPGRADE-GUIDE.md
-
 # Temporary files
 *.tmp
 *.temp
+nul
 
 # Cache directories
 .cache/
@@ -91,19 +61,10 @@ cache/
 # Context storage (user-specific)
 .mcp-context/
 
-# Test coverage files
-coverage.out
-coverage.html
-*.cover
-
-# Debug and profile files  
+# Debug and profile files
 *.prof
 debug*
 profile*
-
-# Cleanup scripts (development only)
-cleanup.bat
-cleanup.sh
 
 # Node modules (if any)
 node_modules/

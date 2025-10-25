@@ -13,7 +13,13 @@
       "Bash(./dxt-build/bin/mcp-context-server:*)",
       "Bash(./mcp-context-server.exe --version)",
       "Bash(./build-dxt.bat)",
-      "Bash(move:*)"
+      "Bash(move:*)",
+      "Bash(go mod tidy:*)",
+      "Bash(./bin/mcp-context-server.exe:*)",
+      "Bash(call build-dxt.bat)",
+      "Bash(dir:*)",
+      "Bash(del testbenchmark_memory_test.go)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []
