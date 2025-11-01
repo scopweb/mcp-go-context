@@ -148,6 +148,90 @@ go build -o mcp-context-server.exe cmd/mcp-context-server/main.go
 | **Claude Desktop Compatibility** | ✅ | ✅ | **FIXED** - Both work seamlessly |
 | **Stability** | Good | ✅ | **IMPROVED** - No disconnections |
 
+---
+
+## 🎯 **Honest Truth: When You Should (and Shouldn't) Use This MCP**
+
+### ✅ **USE THIS MCP IF:**
+
+1. **You work in distributed teams** (3+ developers)
+   - Need shared project context across team members
+   - Want centralized memory management
+   - HTTP API for CI/CD automation
+
+2. **You have large monorepos** (50+ services/modules)
+   - Need AST-based analysis for quick navigation
+   - Dependency mapping is critical
+   - Performance optimization matters
+
+3. **You need automation & scripting**
+   - Using Claude in CI/CD pipelines
+   - Programmatic access via HTTP/SSE
+   - Enterprise security requirements (JWT, CORS)
+
+4. **You want audit logging & compliance**
+   - Need security audit trails
+   - OWASP/CWE compliance required
+   - Enterprise deployments
+
+5. **You're building tools/frameworks**
+   - Need a context provider for other tools
+   - Want to extend MCP capabilities
+   - Research on MCPs and AI context management
+
+---
+
+### ❌ **DON'T USE THIS MCP IF:**
+
+1. **You're a solo developer** on small/medium projects
+   - **Better:** Use Claude Desktop's native `CLAUDE.md`
+   - Claude already remembers context automatically
+   - No need for extra complexity
+
+2. **You just want to remember things**
+   - **Better:** Use Claude's built-in memory or `CLAUDE.md`
+   - Simpler to use and manage
+   - Less overhead
+
+3. **You think it magically solves context problems**
+   - It's NOT AI-powered context ranking
+   - It's regex-based search + heuristics
+   - Claude Desktop is already quite smart with context
+
+4. **You need semantic code understanding**
+   - This MCP only does basic AST parsing
+   - No ML-based code analysis
+   - Not a replacement for actual code intelligence
+
+---
+
+### 📊 **Real-World Decision Matrix**
+
+| Your Situation | Solution | Why |
+|---|---|---|
+| Solo dev + small project | ❌ Skip MCP | Use `CLAUDE.md` natively |
+| Solo dev + large project | 🟡 Maybe | Only if monorepo needs mapping |
+| Team <5 devs | 🟡 Maybe | Workspace sharing might be enough |
+| Team 5+ devs | ✅ Use MCP | Shared context is valuable |
+| CI/CD automation | ✅ Use MCP | HTTP API is essential |
+| Enterprise/Compliance | ✅ Use MCP | Security features needed |
+| Just learning/exploring | ✅ Use MCP | Great for learning MCPs |
+
+---
+
+### 💬 **What Users Actually Say:**
+
+> "**I don't see benefits after a day of use"**
+> ✅ **Solution:** That's normal. Read the [FAQ](./docs/faq/FAQ-01-no-benefits.md). This MCP is for specific use cases, not everyone.
+
+> "**Why is my memory folder empty?"**
+> ✅ **Solution:** You need to actively use `remember-conversation` tool. It's not automatic. Read [FAQ #2](./docs/faq/FAQ-02-empty-memory.md).
+
+> "**How do I use this correctly?"**
+> ✅ **Solution:** Check [FAQ #3](./docs/faq/FAQ-03-correct-usage.md) for practical workflows.
+
+---
+
 ## 🔧 Troubleshooting
 
 ### Common Issues Fixed
