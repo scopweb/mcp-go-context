@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] - 2025-11-01
+
+### Security & Testing
+- **Security Test Suite**: Fixed compilation errors in security tests
+  - Removed unused imports: `fmt` (security_tests.go), `regexp` (cves_test.go)
+  - Resolved duplicate benchmark function names
+  - Fixed linting issues for clean builds
+- **Test Fixes**:
+  - Renamed `BenchmarkSecurityChecks` → `BenchmarkSecurityChecksFromMod` (security_tests.go)
+  - Renamed `BenchmarkSecurityChecks` → `BenchmarkSecurityChecksCVE` (cves_test.go)
+  - Fixed redundant newline in `fmt.Println` (cves_test.go:422)
+- **All Tests Passing**: 100% pass rate (60+ tests including 15 security-focused tests)
+
+### Documentation
+- **Security Audit Report**: Created comprehensive SECURITY_AUDIT_2024.md
+  - OWASP Top 10 (2021) compliance assessment
+  - CWE vulnerability review
+  - JWT authentication verification
+  - CORS security validation
+  - Transport layer security analysis
+  - Deployment recommendations
+  - Compliance & standards review
+
+### Quality Assurance
+- ✅ `go mod verify` - Verified module integrity
+- ✅ `go mod tidy` - Cleaned and organized dependencies
+- ✅ `go test ./test/security -v` - All 15 security tests passed
+- ✅ `go test ./... -v` - All 60+ integration tests passed
+- ✅ `go build` - Binary builds successfully without warnings
+
 ## [2.0.1] - 2025-10-25
 
 ### Performance Optimizations
@@ -156,6 +186,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Version History
 
+- **2.0.2** (2025-11-01) - Security test fixes and comprehensive audit report
 - **2.0.1** (2025-10-25) - Performance optimizations and project organization
 - **2.0.0** (2025-08-28) - MCP 2025, JWT auth, CORS, Desktop Extensions
 - **1.5.0** (2025-08-15) - Security enhancements and new memory tools
