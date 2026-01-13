@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"time"
 
 	"github.com/scopweb/mcp-go-context/internal/analyzer"
 	"github.com/scopweb/mcp-go-context/internal/auth"
+	"github.com/scopweb/mcp-go-context/internal/cache"
 	"github.com/scopweb/mcp-go-context/internal/config"
 	"github.com/scopweb/mcp-go-context/internal/memory"
 	"github.com/scopweb/mcp-go-context/internal/tools"
@@ -19,12 +21,13 @@ import (
 
 // Server represents the MCP Context Server
 type Server struct {
-	config      *config.Config
-	transport   transport.Transport
-	analyzer    *analyzer.ProjectAnalyzer
-	memory      *memory.Manager
-	tools       *tools.Registry
-	jwtManager  *auth.JWTManager
+	config       *config.Config
+	transport    transport.Transport
+	analyzer     *analyzer.ProjectAnalyzer
+	memory       *memory.Manager
+	tools        *tools.Registry
+	jwtManager   *auth.JWTManager
+	contextCache *cache.ContextCache
 	// future: add sync.Mutex if shared state is added
 }
 
@@ -72,14 +75,18 @@ func New(cfg *config.Config) (*Server, error) {
 		Algorithm: cfg.Security.Auth.Algorithm,
 	})
 
+	// Initialize context cache (1000 items, 30 minute TTL)
+	contextCache := cache.NewContextCache(1000, 30*time.Minute)
+
 	// Create server
 	srv := &Server{
-		config:     cfg,
-		transport:  trans,
-		analyzer:   projectAnalyzer,
-		memory:     memoryManager,
-		tools:      tools.NewRegistry(),
-		jwtManager: jwtManager,
+		config:       cfg,
+		transport:    trans,
+		analyzer:     projectAnalyzer,
+		memory:       memoryManager,
+		tools:        tools.NewRegistry(),
+		jwtManager:   jwtManager,
+		contextCache: contextCache,
 	}
 
 	// Register tools
@@ -304,6 +311,11 @@ func (s *Server) GetMemory() tools.MemoryInterface {
 // GetConfig returns the server configuration (implements ConfigInterface)
 func (s *Server) GetConfig() tools.ConfigInterface {
 	return s.config
+}
+
+// GetContextCache returns the context cache
+func (s *Server) GetContextCache() *cache.ContextCache {
+	return s.contextCache
 }
 
 // registerTools registers all available tools to the server

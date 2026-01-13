@@ -14,6 +14,7 @@ import (
 
 	// Import the actual types we need
 	"github.com/scopweb/mcp-go-context/internal/analyzer"
+	"github.com/scopweb/mcp-go-context/internal/cache"
 	"github.com/scopweb/mcp-go-context/internal/memory"
 )
 
@@ -56,6 +57,7 @@ type ServerInterface interface {
 	GetAnalyzer() AnalyzerInterface
 	GetMemory() MemoryInterface
 	GetConfig() ConfigInterface
+	GetContextCache() *cache.ContextCache
 }
 
 type AnalyzerInterface interface {
@@ -209,7 +211,7 @@ func AnalyzeProjectHandler(args json.RawMessage, server interface{}) (interface{
 	}, nil
 }
 
-// GetContextHandler - Complete implementation with smart context retrieval
+// GetContextHandler - Complete implementation with smart context retrieval and caching
 func GetContextHandler(args json.RawMessage, server interface{}) (interface{}, error) {
 	var params struct {
 		Query     string   `json:"query"`
@@ -228,6 +230,24 @@ func GetContextHandler(args json.RawMessage, server interface{}) (interface{}, e
 	srv, ok := server.(ServerInterface)
 	if !ok {
 		return createErrorResponse("Server interface error")
+	}
+
+	// Generate cache key from query and files
+	cacheKey := cache.GenerateCacheKey(params.Query, "balanced", params.Files, ".")
+
+	// Try to get from cache first
+	contextCache := srv.GetContextCache()
+	if contextCache != nil {
+		if cachedValue, found := contextCache.Get(cacheKey); found {
+			if cachedText, ok := cachedValue.(string); ok {
+				return []map[string]interface{}{
+					{
+						"type": "text",
+						"text": cachedText + "\n\n*[Retrieved from cache - context valid for 30 minutes]*",
+					},
+				}, nil
+			}
+		}
 	}
 
 	analyzer := srv.GetAnalyzer()
@@ -265,10 +285,16 @@ func GetContextHandler(args json.RawMessage, server interface{}) (interface{}, e
 		context.WriteString(analysis)
 	}
 
+	// Cache the result
+	contextText := context.String()
+	if contextCache != nil {
+		contextCache.Set(cacheKey, contextText, 0) // Use default TTL (30 minutes)
+	}
+
 	return []map[string]interface{}{
 		{
 			"type": "text",
-			"text": context.String(),
+			"text": contextText,
 		},
 	}, nil
 }

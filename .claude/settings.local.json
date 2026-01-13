@@ -19,7 +19,16 @@
       "Bash(call build-dxt.bat)",
       "Bash(dir:*)",
       "Bash(del testbenchmark_memory_test.go)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(go list:*)",
+      "Bash(go get:*)",
+      "Bash(go mod verify:*)",
+      "Bash(git log:*)",
+      "Bash(QUICK)",
+      "Bash(ARCHITECTURE \")",
+      "Bash(echo:*)"
     ],
     "deny": [],
     "ask": []

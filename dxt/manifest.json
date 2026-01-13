@@ -1,7 +1,7 @@
 {
   "dxt_version": "0.1",
   "name": "mcp-go-context",
-  "version": "2.0.0", 
+  "version": "2.1.0", 
   "description": "Advanced Context Management for AI Coding Assistants - Provides intelligent project analysis, persistent memory, and hybrid documentation fetching",
   "author": {
     "name": "ScopWeb",
