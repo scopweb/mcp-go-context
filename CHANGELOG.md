@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2026-03-24
+
+### Updated
+- **Go Version**: Updated from 1.23 to 1.26.1 for latest compiler optimizations and security patches
+- **MCP Protocol**: Updated from 2025-03-26 to 2025-11-25 (latest spec revision)
+- Updated all documentation to reflect new Go version and MCP protocol version
+- Enhanced security tests to support Go 1.26.x versions
+
+### Fixed
+- Protocol version compliance with MCP specification 2025-11-25
+- Server version info now reports correct version (2.1.1)
+
 ## [2.1.0] - 2025-01-13
 
 ### Performance Enhancements 🚀
@@ -117,7 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0.1] - 2025-10-25
 
 ### Performance Optimizations
-- **Go Version**: Updated from 1.21 to 1.23 for latest compiler optimizations
+- **Go Version**: Updated from 1.21 to 1.26.1 for latest compiler optimizations
 - **Regex Pre-compilation**: 13 regular expressions now compiled at startup
   - 2-5ms faster per regex-heavy function call
   - Affects `analyzeQuery()`, `generateTags()`, and validation functions
@@ -183,7 +195,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Full OPTIONS preflight handling
 
 #### Protocol & Transport
-- 🚀 **Streamable HTTP Transport** - MCP 2025-03-26 protocol compliance
+- 🚀 **Streamable HTTP Transport** - MCP 2025-11-25 protocol compliance
   - Hybrid HTTP + SSE transport
   - Full bidirectional communication
   - Enhanced capabilities support

@@ -17,7 +17,7 @@
 - 🎉 **Desktop Extensions (.dxt)** - One-click installation for Claude Desktop
 - 🔒 **JWT Authentication** - Modern security replacing simple tokens
 - 🛡️ **CORS Configurables** - Secure origin whitelisting (no more wildcard `*`)
-- 🚀 **Streamable HTTP Transport** - MCP 2025-03-26 protocol compliance
+- 🚀 **Streamable HTTP Transport** - MCP 2025-11-25 protocol compliance
 - 📦 **User Configuration** - JWT secrets, config paths with OS keychain
 - ⚙️ **Protocol Upgrade** - Full MCP 2025 capabilities and features
 - 🧪 **Comprehensive Tests** - JWT, CORS, Streamable transport validation
@@ -38,7 +38,7 @@
 - Documentación de autenticación por token con `MCP_SERVER_TOKEN`.
 
 
-[![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat-square&logo=go)](https://golang.org/)
+[![Go](https://img.shields.io/badge/Go-1.26.1+-00ADD8?style=flat-square&logo=go)](https://golang.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-2025--03--26-blue?style=flat-square)](https://modelcontextprotocol.io/)
 [![DXT](https://img.shields.io/badge/Desktop%20Extensions-✓-green?style=flat-square)](#)
@@ -412,7 +412,7 @@ Lista las rutas de proyecto configuradas actualmente.
 - **`stdio`** - Standard I/O (Claude Desktop default, no auth required)
 - **`http`** - HTTP JSON-RPC (with JWT auth support)
 - **`sse`** - Server-Sent Events (real-time streaming)  
-- **`streamable-http`** - Hybrid HTTP + SSE (MCP 2025-03-26 protocol)
+- **`streamable-http`** - Hybrid HTTP + SSE (MCP 2025-11-25 protocol)
 
 ### 🎯 Transport Usage
 ```bash
@@ -427,7 +427,7 @@ Lista las rutas de proyecto configuradas actualmente.
 ```
 
 ### 🔧 Protocol Support
-- **MCP Version**: `2025-03-26` (latest)
+- **MCP Version**: `2025-11-25` (latest)
 - **JSON-RPC**: `2.0` compliant
 - **Capabilities**: Tools, sampling, roots, resources
 - **Security**: JWT authentication, CORS protection

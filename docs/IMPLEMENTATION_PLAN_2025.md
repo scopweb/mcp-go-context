@@ -10,7 +10,7 @@
 ## 📊 Resumen Ejecutivo
 
 El proyecto **MCP Go Context v2.0.2** está en excelente estado técnico:
-- ✅ Completamente actualizado (Go 1.23, MCP 2025-03-26)
+- ✅ Completamente actualizado (Go 1.26.1, MCP 2025-03-26)
 - ✅ Seguridad auditada con suite de 60+ tests
 - ✅ Cero dependencias externas (stdlib puro)
 - ✅ Production-ready

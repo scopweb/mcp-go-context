@@ -135,7 +135,7 @@ func (s *Server) HandleRequest(ctx context.Context, req json.RawMessage) (json.R
 		// Only authenticate for HTTP/SSE requests, not stdio
 		if r, ok := ctx.Value("httpRequest").(*http.Request); ok {
 			authHeader := r.Header.Get("Authorization")
-			
+
 			token, err := auth.ExtractTokenFromHeader(authHeader)
 			if err != nil {
 				log.Printf("Auth header error: %v", err)
@@ -220,7 +220,7 @@ func (s *Server) createErrorResponse(id interface{}, code int, message string) (
 // handleInitialize handles the initialize request
 func (s *Server) handleInitialize(id interface{}) (interface{}, error) {
 	return map[string]interface{}{
-		"protocolVersion": "2025-03-26", // Updated to MCP 2025
+		"protocolVersion": "2025-11-25", // MCP specification revision (latest)
 		"capabilities": map[string]interface{}{
 			"tools": map[string]interface{}{
 				"listChanged": false,
@@ -237,12 +237,12 @@ func (s *Server) handleInitialize(id interface{}) (interface{}, error) {
 			},
 		},
 		"serverInfo": map[string]interface{}{
-			"name":    "MCP Context Server",
-			"version": "2.0.0", // Updated version
-			"protocol": "2025-03-26",
+			"name":     "MCP Context Server",
+			"version":  "2.1.1",      // Current version
+			"protocol": "2025-11-25", // MCP spec revision
 			"features": []string{
 				"project-analysis",
-				"persistent-memory", 
+				"persistent-memory",
 				"documentation-fetching",
 				"jwt-authentication",
 				"cors-security",
@@ -552,8 +552,8 @@ func (s *Server) generateTokenHandler(args json.RawMessage, server interface{}) 
 	return []map[string]interface{}{
 		{
 			"type": "text",
-			"text": fmt.Sprintf("JWT Token Generated:\n\nToken: %s\n\nUsage:\nAuthorization: Bearer %s\n\nExpires: %s", 
-				token, token, 
+			"text": fmt.Sprintf("JWT Token Generated:\n\nToken: %s\n\nUsage:\nAuthorization: Bearer %s\n\nExpires: %s",
+				token, token,
 				fmt.Sprintf("in %s", s.config.Security.Auth.Expiry.String())),
 		},
 	}, nil

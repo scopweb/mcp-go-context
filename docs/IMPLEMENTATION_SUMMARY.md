@@ -15,7 +15,7 @@ Optimizar el MCP Go Context para proporcionar contexto más rápido, limpio y re
 | Aspecto | Status | Detalles |
 |---------|--------|----------|
 | Versión | ✅ v2.0.2 (Actual) | Completamente actualizada |
-| Go | ✅ 1.23 | Última versión estable |
+| Go | ✅ 1.26.1 | Última versión estable |
 | MCP | ✅ 2025-03-26 | Fully compliant |
 | Tests | ✅ 60+ | 100% passing |
 | Dependencias | ✅ 0 | Stdlib puro |

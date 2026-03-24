@@ -22,7 +22,7 @@ El proyecto está **bien**, pero estas **3 mejoras son muy recomendadas**:
 
 ✅ **Muy Bien**
 - Versión actualizada (v2.0.2)
-- Go 1.23
+- Go 1.26.1
 - MCP 2025-03-26 compliant
 - Seguridad auditada
 - 60+ tests

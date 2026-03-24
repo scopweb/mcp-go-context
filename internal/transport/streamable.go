@@ -13,7 +13,7 @@ import (
 	"github.com/scopweb/mcp-go-context/internal/security"
 )
 
-// StreamableHTTPTransport implements MCP Streamable HTTP Transport (2025-03-26)
+// StreamableHTTPTransport implements MCP Streamable HTTP Transport (2025-11-25)
 // Combines HTTP request-response with Server-Sent Events for bidirectional communication
 type StreamableHTTPTransport struct {
 	port       int
@@ -104,18 +104,18 @@ func (t *StreamableHTTPTransport) Start(ctx context.Context, info ServerInfo, ha
 	// Health and capabilities endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		corsMiddleware.SetHeaders(w, r)
-		
+
 		if r.Method == http.MethodOptions {
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":      "ok",
-			"server":      info.Name,
-			"version":     info.Version,
-			"protocol":    "2025-03-26",
-			"transport":   "streamable-http",
+			"status":    "ok",
+			"server":    info.Name,
+			"version":   info.Version,
+			"protocol":  "2025-11-25",
+			"transport": "streamable-http",
 			"capabilities": map[string]interface{}{
 				"streaming": true,
 				"http":      true,
@@ -259,7 +259,7 @@ func (t *StreamableHTTPTransport) handleStreamConnection(w http.ResponseWriter, 
 		"sessionId": sessionID,
 		"server":    info.Name,
 		"version":   info.Version,
-		"protocol":  "2025-03-26",
+		"protocol":  "2025-11-25",
 	})
 	fmt.Fprintf(w, "event: init\ndata: %s\n\n", initData)
 	flusher.Flush()
@@ -316,14 +316,14 @@ func (t *StreamableHTTPTransport) handleStreamMessage(w http.ResponseWriter, r *
 	go func() {
 		ctxWithReq := context.WithValue(ctx, "httpRequest", r)
 		respData, err := handler(ctxWithReq, reqData)
-		
+
 		// Update session activity
 		session.lastActive = time.Now()
 
 		var response json.RawMessage
 		if err != nil {
 			errorResp, _ := json.Marshal(map[string]interface{}{
-				"type":  "error", 
+				"type":  "error",
 				"error": err.Error(),
 			})
 			response = errorResp

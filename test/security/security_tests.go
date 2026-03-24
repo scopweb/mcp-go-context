@@ -99,11 +99,11 @@ func TestGoSumIntegrity(t *testing.T) {
 // TestMainDependencies checks critical dependencies for known issues
 func TestMainDependencies(t *testing.T) {
 	criticalDeps := map[string]string{
-		"github.com/mark3labs/mcp-go":       "v0.42.0", // MCP SDK
-		"github.com/panjf2000/ants/v2":      "v2.11.3", // Goroutine pool
-		"github.com/allegro/bigcache/v3":    "v3.1.0",  // Cache
-		"github.com/patrickmn/go-cache":     "v2.1.0",  // Cache
-		"github.com/fsnotify/fsnotify":      "v1.9.0",  // File watchers
+		"github.com/mark3labs/mcp-go":    "v0.42.0", // MCP SDK
+		"github.com/panjf2000/ants/v2":   "v2.11.3", // Goroutine pool
+		"github.com/allegro/bigcache/v3": "v3.1.0",  // Cache
+		"github.com/patrickmn/go-cache":  "v2.1.0",  // Cache
+		"github.com/fsnotify/fsnotify":   "v1.9.0",  // File watchers
 	}
 
 	cmd := exec.Command("go", "list", "-m", "all")
@@ -287,7 +287,7 @@ func TestGoVersion(t *testing.T) {
 		if strings.HasPrefix(line, "go ") {
 			t.Logf("Go version requirement: %s", strings.TrimSpace(line))
 			// Go 1.24 is latest as of this test
-			if strings.Contains(line, "1.24") || strings.Contains(line, "1.23") {
+			if strings.Contains(line, "1.26") || strings.Contains(line, "1.25") || strings.Contains(line, "1.24") {
 				t.Log("✅ Go version is modern and well-maintained")
 			}
 		}
