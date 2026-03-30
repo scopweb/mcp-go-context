@@ -88,6 +88,42 @@ type MemoryEntry struct {
 	Created time.Time
 }
 
+func textResult(text string) CallResult {
+	return CallResult{
+		Content: []map[string]interface{}{
+			{
+				"type": "text",
+				"text": text,
+			},
+		},
+	}
+}
+
+func textStructuredResult(text string, structured map[string]interface{}) CallResult {
+	result := textResult(text)
+	result.StructuredContent = structured
+	return result
+}
+
+func dependencyToMap(dep Dependency) map[string]interface{} {
+	return map[string]interface{}{
+		"name":    dep.Name,
+		"version": dep.Version,
+		"type":    dep.Type,
+		"path":    dep.Path,
+	}
+}
+
+func memoryToMap(item *Memory) map[string]interface{} {
+	return map[string]interface{}{
+		"key":       item.Key,
+		"content":   item.Content,
+		"tags":      item.Tags,
+		"timestamp": item.Timestamp.UTC().Format(time.RFC3339),
+		"usage":     item.Usage,
+	}
+}
+
 // Convert memory.Memory to MemoryEntry for compatibility
 func convertMemoryToEntry(m *Memory) MemoryEntry {
 	return MemoryEntry{
@@ -203,12 +239,18 @@ func AnalyzeProjectHandler(args json.RawMessage, server interface{}) (interface{
 			relPath, file.Language, float64(file.Size)/1024)
 	}
 
-	return []map[string]interface{}{
-		{
-			"type": "text",
-			"text": result.String(),
-		},
-	}, nil
+	structured := map[string]interface{}{
+		"rootPath":             structure.RootPath,
+		"totalFiles":           structure.Stats.TotalFiles,
+		"totalSize":            structure.Stats.TotalSize,
+		"languages":            structure.Stats.Languages,
+		"directories":          sortedStructureKeys(structure.Structure),
+		"directDependencies":   dependencyMapsByType(structure.Dependencies, "direct"),
+		"indirectDependencies": dependencyMapsByType(structure.Dependencies, "indirect"),
+		"keyFiles":             keyFileMaps(structure.RootPath, keyFiles),
+	}
+
+	return textStructuredResult(result.String(), structured), nil
 }
 
 // GetContextHandler - Complete implementation with smart context retrieval and caching
@@ -390,13 +432,12 @@ func RememberConversationHandler(args json.RawMessage, server interface{}) (inte
 		return createErrorResponse(fmt.Sprintf("Failed to store memory: %v", err))
 	}
 
-	return []map[string]interface{}{
-		{
-			"type": "text",
-			"text": fmt.Sprintf("✅ Successfully stored memory '%s' with tags: %v",
-				params.Key, params.Tags),
-		},
-	}, nil
+	text := fmt.Sprintf("✅ Successfully stored memory '%s' with tags: %v", params.Key, params.Tags)
+	return textStructuredResult(text, map[string]interface{}{
+		"stored": true,
+		"key":    params.Key,
+		"tags":   params.Tags,
+	}), nil
 }
 
 // DependencyAnalysisHandler - Complete dependency analysis
@@ -474,22 +515,24 @@ func DependencyAnalysisHandler(args json.RawMessage, server interface{}) (interf
 		result.WriteString(fmt.Sprintf("- %s\n", rec))
 	}
 
-	return []map[string]interface{}{
-		{
-			"type": "text",
-			"text": result.String(),
-		},
-	}, nil
+	return textStructuredResult(result.String(), map[string]interface{}{
+		"directDependencies":   dependencyMaps(directDeps),
+		"indirectDependencies": dependencyMaps(indirectDeps),
+		"recommendations":      recommendations,
+	}), nil
 }
 
 // Helper functions
 
-func createErrorResponse(message string) ([]map[string]interface{}, error) {
-	return []map[string]interface{}{
-		{
-			"type": "text",
-			"text": fmt.Sprintf("❌ Error: %s", message),
+func createErrorResponse(message string) (CallResult, error) {
+	return CallResult{
+		Content: []map[string]interface{}{
+			{
+				"type": "text",
+				"text": fmt.Sprintf("❌ Error: %s", message),
+			},
 		},
+		IsError: true,
 	}, nil
 }
 
@@ -575,10 +618,9 @@ func MemoryGetHandler(args json.RawMessage, server interface{}) (interface{}, er
 	if err != nil {
 		return createErrorResponse(fmt.Sprintf("Memory not found: %v", err))
 	}
-	return []map[string]interface{}{{
-		"type": "text",
-		"text": fmt.Sprintf("%s", item.Content),
-	}}, nil
+	return textStructuredResult(fmt.Sprintf("%s", item.Content), map[string]interface{}{
+		"memory": memoryToMap(item),
+	}), nil
 }
 
 // memory/search
@@ -614,10 +656,10 @@ func MemorySearchHandler(args json.RawMessage, server interface{}) (interface{},
 	for _, m := range found {
 		fmt.Fprintf(&b, "- %s: %s\n", m.Key, m.Content)
 	}
-	return []map[string]interface{}{{
-		"type": "text",
-		"text": b.String(),
-	}}, nil
+	return textStructuredResult(b.String(), map[string]interface{}{
+		"count":    len(found),
+		"memories": memoryMaps(found),
+	}), nil
 }
 
 // memory/recent
@@ -648,10 +690,10 @@ func MemoryRecentHandler(args json.RawMessage, server interface{}) (interface{},
 	for _, m := range list {
 		fmt.Fprintf(&b, "- %s: %s\n", m.Key, m.Content)
 	}
-	return []map[string]interface{}{{
-		"type": "text",
-		"text": b.String(),
-	}}, nil
+	return textStructuredResult(b.String(), map[string]interface{}{
+		"count":    len(list),
+		"memories": memoryMaps(list),
+	}), nil
 }
 
 // memory/clear (destructive; require explicit confirm)
@@ -698,10 +740,61 @@ func ConfigGetProjectPathsHandler(args json.RawMessage, server interface{}) (int
 	for _, p := range paths {
 		b.WriteString("- `" + p + "`\n")
 	}
-	return []map[string]interface{}{{
-		"type": "text",
-		"text": b.String(),
-	}}, nil
+	return textStructuredResult(b.String(), map[string]interface{}{
+		"count": len(paths),
+		"paths": paths,
+	}), nil
+}
+
+func dependencyMaps(deps []Dependency) []map[string]interface{} {
+	items := make([]map[string]interface{}, 0, len(deps))
+	for _, dep := range deps {
+		items = append(items, dependencyToMap(dep))
+	}
+	return items
+}
+
+func dependencyMapsByType(deps []Dependency, depType string) []map[string]interface{} {
+	items := make([]map[string]interface{}, 0)
+	for _, dep := range deps {
+		if dep.Type == depType {
+			items = append(items, dependencyToMap(dep))
+		}
+	}
+	return items
+}
+
+func keyFileMaps(rootPath string, files []*FileInfo) []map[string]interface{} {
+	items := make([]map[string]interface{}, 0, len(files))
+	for _, file := range files {
+		relPath, err := filepath.Rel(rootPath, file.Path)
+		if err != nil {
+			relPath = file.Path
+		}
+		items = append(items, map[string]interface{}{
+			"path":     relPath,
+			"language": file.Language,
+			"size":     file.Size,
+		})
+	}
+	return items
+}
+
+func sortedStructureKeys(structure map[string][]string) []string {
+	keys := make([]string, 0, len(structure))
+	for key := range structure {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func memoryMaps(items []*Memory) []map[string]interface{} {
+	result := make([]map[string]interface{}, 0, len(items))
+	for _, item := range items {
+		result = append(result, memoryToMap(item))
+	}
+	return result
 }
 
 func fetchFromContext7(library, version, topic string, tokens int) (string, error) {

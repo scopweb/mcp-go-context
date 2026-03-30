@@ -7,14 +7,24 @@ import (
 
 // Tool represents an MCP tool
 type Tool struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	InputSchema map[string]interface{} `json:"inputSchema"`
-	Handler     ToolHandler            `json:"-"`
+	Name         string                 `json:"name"`
+	Title        string                 `json:"title,omitempty"`
+	Description  string                 `json:"description"`
+	InputSchema  map[string]interface{} `json:"inputSchema"`
+	OutputSchema map[string]interface{} `json:"outputSchema,omitempty"`
+	Annotations  map[string]interface{} `json:"annotations,omitempty"`
+	Handler      ToolHandler            `json:"-"`
 }
 
 // ToolHandler is a function that handles tool execution
 type ToolHandler func(args json.RawMessage, ctx interface{}) (interface{}, error)
+
+// CallResult represents a tool execution result with optional error semantics.
+type CallResult struct {
+	Content           []map[string]interface{}
+	StructuredContent map[string]interface{}
+	IsError           bool
+}
 
 // Registry manages available tools
 type Registry struct {
@@ -42,11 +52,21 @@ func (r *Registry) List() []map[string]interface{} {
 	var tools []map[string]interface{}
 
 	for _, tool := range r.tools {
-		tools = append(tools, map[string]interface{}{
+		entry := map[string]interface{}{
 			"name":        tool.Name,
 			"description": tool.Description,
 			"inputSchema": tool.InputSchema,
-		})
+		}
+		if tool.Title != "" {
+			entry["title"] = tool.Title
+		}
+		if len(tool.Annotations) > 0 {
+			entry["annotations"] = tool.Annotations
+		}
+		if len(tool.OutputSchema) > 0 {
+			entry["outputSchema"] = tool.OutputSchema
+		}
+		tools = append(tools, entry)
 	}
 
 	return tools

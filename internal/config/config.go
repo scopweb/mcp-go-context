@@ -137,8 +137,8 @@ func DefaultConfig() *Config {
 			CORS: CORSConfig{
 				Enabled: true,
 				Origins: []string{"https://localhost:3000", "app://claude-desktop"},
-				Methods: []string{"POST", "OPTIONS"},
-				Headers: []string{"Content-Type", "Authorization"},
+				Methods: []string{"GET", "POST", "DELETE", "OPTIONS"},
+				Headers: []string{"Accept", "Content-Type", "Authorization", "MCP-Protocol-Version", "MCP-Session-Id"},
 			},
 			RateLimit: RateLimitConfig{
 				Enabled:  false,

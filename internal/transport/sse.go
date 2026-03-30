@@ -2,6 +2,8 @@ package transport
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -248,5 +250,9 @@ func (s *SSETransport) removeSession(sessionID string) {
 }
 
 func generateSessionID() string {
-	return fmt.Sprintf("session-%d", time.Now().UnixNano())
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("session-%d", time.Now().UnixNano())
+	}
+	return "session-" + hex.EncodeToString(buf)
 }
