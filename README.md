@@ -125,17 +125,26 @@ go build -o mcp-context-server.exe cmd/mcp-context-server/main.go
 
 ## ⚙️ Configuration
 
-### For Claude Desktop (stdio - no changes needed)
+### For Claude Desktop and Claude Code (stdio recommended)
 ```json
 {
   "mcpServers": {
     "mcp-go-context": {
       "command": "C:\\path\\to\\mcp-context-server.exe",
-      "args": ["--transport", "stdio", "--verbose"]
+	      "args": ["--transport", "stdio"]
     }
   }
 }
 ```
+
+Use `--verbose` only when debugging startup or protocol issues. For normal Claude Code/Desktop usage, quiet stdio mode is faster and avoids noisy stderr logs.
+
+### Claude workflow recommendations
+
+- Start each new repository session with `analyze-project` only once, then switch to `get-context` for focused work.
+- Save durable outcomes with `remember-conversation` using stable keys like `repo/component/topic`.
+- On a new Claude thread or fresh Desktop session, recover state with `memory-search`, `memory-get`, or `memory-recent` before repeating analysis.
+- Use `fetch-docs` only when the answer depends on external libraries or APIs rather than the local codebase.
 
 ### For Advanced HTTP/SSE Usage
 ```json

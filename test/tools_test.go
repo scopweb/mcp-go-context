@@ -177,6 +177,19 @@ func TestToolsListIncludesMetadata(t *testing.T) {
 		t.Fatalf("Expected read-only annotations for analyze-project, got %v", analyzeProject["annotations"])
 	}
 
+	getContext := toolsByName["get-context"]
+	if getContext == nil {
+		t.Fatal("Expected get-context metadata")
+	}
+	contextSchema, _ := getContext["outputSchema"].(map[string]interface{})
+	if contextSchema == nil {
+		t.Fatal("Expected outputSchema for get-context")
+	}
+	contextProperties, _ := contextSchema["properties"].(map[string]interface{})
+	if contextProperties == nil || contextProperties["source"] == nil || contextProperties["text"] == nil {
+		t.Fatalf("Expected structured output properties for get-context, got %v", contextSchema)
+	}
+
 	memoryClear := toolsByName["memory-clear"]
 	if memoryClear == nil {
 		t.Fatal("Expected memory-clear metadata")
@@ -207,8 +220,9 @@ func TestInitializeInstructionsGuideToolSelection(t *testing.T) {
 	}
 
 	expectedSnippets := []string{
-		"Selection rules for Claude Desktop and other MCP hosts",
+		"Selection rules for Claude Code and Claude Desktop",
 		"Use analyze-project first",
+		"prefer stable keys such as repo/component/topic",
 		"Do not use memory-clear unless the user explicitly asks",
 		"analyze-project (Analyze Project)",
 		"auth-generate-token (Generate JWT Token)",

@@ -282,12 +282,14 @@ func GetContextHandler(args json.RawMessage, server interface{}) (interface{}, e
 	if contextCache != nil {
 		if cachedValue, found := contextCache.Get(cacheKey); found {
 			if cachedText, ok := cachedValue.(string); ok {
-				return []map[string]interface{}{
-					{
-						"type": "text",
-						"text": cachedText + "\n\n*[Retrieved from cache - context valid for 30 minutes]*",
-					},
-				}, nil
+				structured := map[string]interface{}{
+					"query":     params.Query,
+					"files":     params.Files,
+					"maxTokens": params.MaxTokens,
+					"source":    "cache",
+					"text":      cachedText,
+				}
+				return textStructuredResult(cachedText+"\n\n*[Retrieved from cache - context valid for 30 minutes]*", structured), nil
 			}
 		}
 	}
@@ -333,12 +335,15 @@ func GetContextHandler(args json.RawMessage, server interface{}) (interface{}, e
 		contextCache.Set(cacheKey, contextText, 0) // Use default TTL (30 minutes)
 	}
 
-	return []map[string]interface{}{
-		{
-			"type": "text",
-			"text": contextText,
-		},
-	}, nil
+	structured := map[string]interface{}{
+		"query":     params.Query,
+		"files":     params.Files,
+		"maxTokens": params.MaxTokens,
+		"source":    "analysis",
+		"text":      contextText,
+	}
+
+	return textStructuredResult(contextText, structured), nil
 }
 
 // FetchDocsHandler - Context7-like API integration
@@ -370,34 +375,42 @@ func FetchDocsHandler(args json.RawMessage, server interface{}) (interface{}, er
 	// Try Context7 API first
 	docs, err := fetchFromContext7(params.Library, params.Version, params.Topic, params.Tokens)
 	if err == nil && docs != "" {
-		return []map[string]interface{}{
-			{
-				"type": "text",
-				"text": docs,
-			},
-		}, nil
+		structured := map[string]interface{}{
+			"library": params.Library,
+			"version": params.Version,
+			"topic":   params.Topic,
+			"source":  "context7",
+			"text":    docs,
+		}
+		return textStructuredResult(docs, structured), nil
 	}
 
 	// Fallback to local documentation search
 	localDocs := searchLocalDocs(params.Library, params.Topic)
 	if localDocs != "" {
-		return []map[string]interface{}{
-			{
-				"type": "text",
-				"text": fmt.Sprintf("# Local Documentation for %s\n\n%s", params.Library, localDocs),
-			},
-		}, nil
+		text := fmt.Sprintf("# Local Documentation for %s\n\n%s", params.Library, localDocs)
+		structured := map[string]interface{}{
+			"library": params.Library,
+			"version": params.Version,
+			"topic":   params.Topic,
+			"source":  "local",
+			"text":    text,
+		}
+		return textStructuredResult(text, structured), nil
 	}
 
 	// Generate basic library info
 	basicInfo := generateLibraryInfo(params.Library, params.Version)
 
-	return []map[string]interface{}{
-		{
-			"type": "text",
-			"text": basicInfo,
-		},
-	}, nil
+	structured := map[string]interface{}{
+		"library": params.Library,
+		"version": params.Version,
+		"topic":   params.Topic,
+		"source":  "generated",
+		"text":    basicInfo,
+	}
+
+	return textStructuredResult(basicInfo, structured), nil
 }
 
 // RememberConversationHandler - Enhanced memory storage

@@ -64,6 +64,12 @@ var supportedProtocolVersions = map[string]struct{}{
 
 const latestProtocolVersion = "2025-11-25"
 
+const (
+	serverName    = "mcp-go-context"
+	serverTitle   = "MCP Go Context"
+	serverVersion = "2.1.1"
+)
+
 // New creates a new MCP Context Server
 func New(cfg *config.Config) (*Server, error) {
 	// Initialize transport
@@ -133,10 +139,9 @@ func New(cfg *config.Config) (*Server, error) {
 func (s *Server) Start(ctx context.Context) error {
 	// Initialize server info
 	info := transport.ServerInfo{
-		Name:    "MCP Context Server",
-		Version: "1.0.0",
-		Instructions: `This server provides intelligent context management for coding assistance.
-It analyzes your project, fetches relevant documentation, and maintains conversation memory.`,
+		Name:         serverName,
+		Version:      serverVersion,
+		Instructions: s.buildInstructions(),
 	}
 
 	// Start transport
@@ -315,8 +320,9 @@ func (s *Server) handleInitialize(ctx context.Context, rawParams json.RawMessage
 			},
 		},
 		"serverInfo": map[string]interface{}{
-			"name":     "MCP Context Server",
-			"version":  "2.1.1",
+			"name":     serverName,
+			"title":    serverTitle,
+			"version":  serverVersion,
 			"protocol": protocolVersion,
 			"features": []string{
 				"project-analysis",
@@ -333,7 +339,7 @@ func (s *Server) handleInitialize(ctx context.Context, rawParams json.RawMessage
 
 func negotiateProtocolVersion(clientVersion string) string {
 	if clientVersion == "" {
-		return "2025-03-26"
+		return latestProtocolVersion
 	}
 	if _, ok := supportedProtocolVersions[clientVersion]; ok {
 		return clientVersion
@@ -356,14 +362,19 @@ func (s *Server) buildInstructions() string {
 	sort.Strings(names)
 
 	var builder strings.Builder
-	builder.WriteString("This server provides project analysis, documentation lookup, and persistent memory tools for coding workflows.\n\n")
-	builder.WriteString("Selection rules for Claude Desktop and other MCP hosts:\n")
-	builder.WriteString("- Use analyze-project first when the user asks for a repository overview, architecture review, onboarding summary, or broad codebase understanding.\n")
-	builder.WriteString("- Use get-context for targeted questions about specific files, symbols, bugs, or implementation areas after you know what to inspect.\n")
-	builder.WriteString("- Use dependency-analysis when the task is about packages, dependency risk, dependency inventory, or what docs to consult.\n")
-	builder.WriteString("- Use fetch-docs only when external library or API documentation is needed. Include library, and version or topic when known.\n")
-	builder.WriteString("- Use memory-get, memory-search, and memory-recent to reuse prior conversation context. Use remember-conversation only for durable facts worth keeping.\n")
-	builder.WriteString("- Use config-get-project-paths when you need the configured workspace roots before analysis.\n")
+	builder.WriteString("This server is optimized for Claude Code and Claude Desktop workflows that need reusable repository context, durable decisions, and fast focused retrieval.\n\n")
+	builder.WriteString("Selection rules for Claude Code and Claude Desktop:\n")
+	builder.WriteString("- Use analyze-project first for a fresh repository, architecture review, onboarding request, or when you need a map of the codebase before drilling in.\n")
+	builder.WriteString("- Use config-get-project-paths before analyze-project when workspace roots are unclear or when the session starts without obvious repository context.\n")
+	builder.WriteString("- Use get-context for targeted code questions after you know the relevant files, area, bug, symbol, or subsystem. Pass specific files when possible.\n")
+	builder.WriteString("- Use dependency-analysis for package review, dependency risk, or deciding what external docs should be consulted next.\n")
+	builder.WriteString("- Use fetch-docs only for external library or API documentation. Include library, and version or topic when known.\n")
+	builder.WriteString("- Before answering historical or architectural questions, check memory-search or memory-recent so prior decisions are reused across threads and fresh Claude sessions.\n")
+	builder.WriteString("- Use memory-get when the user references an exact saved key or when a stable key is already known.\n")
+	builder.WriteString("- Use remember-conversation only for durable facts: accepted designs, implementation decisions, debugging outcomes, stable conventions, deployment notes, or reusable task summaries.\n")
+	builder.WriteString("- When saving memory, prefer stable keys such as repo/component/topic, team/decision/name, or bugfix/area/symptom. Add concise tags so future searches succeed.\n")
+	builder.WriteString("- For Claude Code refactors or long task chains, store the final outcome with remember-conversation if it will matter in another thread.\n")
+	builder.WriteString("- For Claude Desktop follow-up sessions, rebuild state with memory-recent or memory-search instead of repeating full project analysis unless the repo changed materially.\n")
 	builder.WriteString("- Use auth-generate-token only for development or testing flows when JWT authentication is enabled.\n")
 	builder.WriteString("- Do not use memory-clear unless the user explicitly asks to wipe memory and provides the required confirmation string.\n")
 	builder.WriteString("- Prefer the narrowest tool that answers the request. Do not repeatedly call analyze-project if a focused tool can answer the next step.\n")
@@ -491,6 +502,34 @@ func memoryListOutputSchema() map[string]interface{} {
 			"memories": map[string]interface{}{"type": "array", "items": memoryItemSchema()},
 		},
 		"required": []string{"count", "memories"},
+	}
+}
+
+func getContextOutputSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"query":     map[string]interface{}{"type": "string"},
+			"files":     map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+			"maxTokens": map[string]interface{}{"type": "integer"},
+			"source":    map[string]interface{}{"type": "string"},
+			"text":      map[string]interface{}{"type": "string"},
+		},
+		"required": []string{"query", "files", "maxTokens", "source", "text"},
+	}
+}
+
+func fetchDocsOutputSchema() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"library": map[string]interface{}{"type": "string"},
+			"version": map[string]interface{}{"type": "string"},
+			"topic":   map[string]interface{}{"type": "string"},
+			"source":  map[string]interface{}{"type": "string"},
+			"text":    map[string]interface{}{"type": "string"},
+		},
+		"required": []string{"library", "version", "topic", "source", "text"},
 	}
 }
 
@@ -660,7 +699,7 @@ func (s *Server) registerTools() {
 	s.tools.Register(&tools.Tool{
 		Name:        "analyze-project",
 		Title:       "Analyze Project",
-		Description: "Analyzes the project structure, dependencies, and provides comprehensive context",
+		Description: "Start here for a new repository or broad architecture question; returns structure, key files, and dependencies",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -683,7 +722,7 @@ func (s *Server) registerTools() {
 	s.tools.Register(&tools.Tool{
 		Name:        "get-context",
 		Title:       "Get Relevant Context",
-		Description: "Retrieves relevant context for the current task based on files, dependencies, and conversation history",
+		Description: "Use after repository discovery to retrieve focused code and memory context for a specific bug, symbol, file set, or task",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -705,15 +744,16 @@ func (s *Server) registerTools() {
 			},
 			"required": []string{"query"},
 		},
-		Annotations: toolAnnotations(true, false, true, false),
-		Handler:     tools.GetContextHandler,
+		OutputSchema: getContextOutputSchema(),
+		Annotations:  toolAnnotations(true, false, true, false),
+		Handler:      tools.GetContextHandler,
 	})
 
 	// fetch-docs tool
 	s.tools.Register(&tools.Tool{
 		Name:        "fetch-docs",
 		Title:       "Fetch Library Documentation",
-		Description: "Fetches documentation for libraries and dependencies",
+		Description: "Fetch external library or API documentation when the answer depends on behavior outside the local repository",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -732,15 +772,16 @@ func (s *Server) registerTools() {
 			},
 			"required": []string{"library"},
 		},
-		Annotations: toolAnnotations(true, false, true, true),
-		Handler:     tools.FetchDocsHandler,
+		OutputSchema: fetchDocsOutputSchema(),
+		Annotations:  toolAnnotations(true, false, true, true),
+		Handler:      tools.FetchDocsHandler,
 	})
 
 	// remember-conversation tool
 	s.tools.Register(&tools.Tool{
 		Name:        "remember-conversation",
 		Title:       "Remember Conversation Context",
-		Description: "Stores important context from the current conversation for future reference",
+		Description: "Persist durable project decisions, conventions, and task outcomes under a stable key for reuse across sessions and threads",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -794,7 +835,7 @@ func (s *Server) registerTools() {
 	s.tools.Register(&tools.Tool{
 		Name:        "memory-get",
 		Title:       "Get Memory Item",
-		Description: "Retrieve a memory item by key",
+		Description: "Retrieve an exact saved memory by key when the key is already known",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -811,7 +852,7 @@ func (s *Server) registerTools() {
 	s.tools.Register(&tools.Tool{
 		Name:        "memory-search",
 		Title:       "Search Memories",
-		Description: "Search memories by query or tags",
+		Description: "Search saved context by query or tags before re-analyzing the repository or repeating prior decisions",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -829,7 +870,7 @@ func (s *Server) registerTools() {
 	s.tools.Register(&tools.Tool{
 		Name:        "memory-recent",
 		Title:       "List Recent Memories",
-		Description: "Get recent memories",
+		Description: "List recent saved context to quickly rebuild state in a fresh Claude session",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -861,7 +902,7 @@ func (s *Server) registerTools() {
 	s.tools.Register(&tools.Tool{
 		Name:         "config-get-project-paths",
 		Title:        "Get Configured Project Paths",
-		Description:  "Get configured project paths",
+		Description:  "Return configured workspace and repository roots before analysis or context retrieval",
 		InputSchema:  map[string]interface{}{"type": "object"},
 		OutputSchema: configPathsOutputSchema(),
 		Annotations:  toolAnnotations(true, false, true, false),

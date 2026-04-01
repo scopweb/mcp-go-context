@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -14,7 +15,7 @@ import (
 )
 
 var (
-	version = "1.0.0"
+	version = "2.1.1"
 	commit  = "dev"
 )
 
@@ -34,15 +35,18 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Setup logging
-	if !*verbose {
+	// Setup logging. Claude Code/Desktop use stdio and benefit from a quiet stderr by default.
+	if *verbose || *transport != "stdio" {
 		log.SetOutput(os.Stderr)
+	} else {
+		log.SetOutput(io.Discard)
 	}
 
 	// Load configuration
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Override transport settings from flags
@@ -56,7 +60,8 @@ func main() {
 	// Create server
 	srv, err := server.New(cfg)
 	if err != nil {
-		log.Fatalf("Failed to create server: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to create server: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Setup graceful shutdown
@@ -75,6 +80,7 @@ func main() {
 	// Start server
 	log.Printf("Starting MCP Context Server v%s on %s...", version, cfg.Transport.Type)
 	if err := srv.Start(ctx); err != nil {
-		log.Fatalf("Server error: %v", err)
+		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
+		os.Exit(1)
 	}
 }
