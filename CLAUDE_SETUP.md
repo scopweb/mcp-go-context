@@ -2,7 +2,7 @@
 
 ## Instalación
 
-1. Ejecuta `build.bat` para compilar el servidor
+1. Ejecuta `build-enhanced.bat` para compilar el servidor en Windows
 2. Copia la configuración del servidor a tu claude_desktop_config.json
 
 ## Configuración para claude_desktop_config.json

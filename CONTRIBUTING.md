@@ -17,7 +17,7 @@ First off, thank you for considering contributing to MCP Context Server! 🎉
    ```
 4. **Run tests** to ensure everything works:
    ```bash
-   go run test-complete.go
+   go test ./...
    ```
 
 ## 🛠️ Development Workflow
@@ -32,9 +32,6 @@ First off, thank you for considering contributing to MCP Context Server! 🎉
 
 3. **Run the test suite**:
    ```bash
-   # Comprehensive tests
-   go run test-complete.go
-   
    # Unit tests
    go test ./...
    
@@ -83,7 +80,7 @@ go test ./internal/analyzer
 go test -cover ./...
 
 # Integration tests
-go run test-complete.go
+go test ./...
 ```
 
 ## 📝 Code Style
