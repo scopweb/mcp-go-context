@@ -41,3 +41,6 @@ interface-test.go
 
 # Config files for testing
 test-config.json
+
+mempalace_repo/
+.claude/
