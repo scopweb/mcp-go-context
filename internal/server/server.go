@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/scopweb/mcp-context-server/internal/analyzer"
-	"github.com/scopweb/mcp-context-server/internal/config"
-	"github.com/scopweb/mcp-context-server/internal/memory"
-	"github.com/scopweb/mcp-context-server/internal/tools"
-	"github.com/scopweb/mcp-context-server/internal/transport"
+	"github.com/scopweb/mcp-go-context/internal/analyzer"
+	"github.com/scopweb/mcp-go-context/internal/config"
+	"github.com/scopweb/mcp-go-context/internal/memory"
+	"github.com/scopweb/mcp-go-context/internal/tools"
+	"github.com/scopweb/mcp-go-context/internal/transport"
 )
 
 // Server represents the MCP Context Server
@@ -195,17 +195,17 @@ func (s *Server) handleToolCall(req json.RawMessage) (interface{}, error) {
 	}, nil
 }
 
-// GetAnalyzer returns the project analyzer (implements AnalyzerInterface)
+// GetAnalyzer returns the project analyzer
 func (s *Server) GetAnalyzer() tools.AnalyzerInterface {
 	return s.analyzer
 }
 
-// GetMemory returns the memory manager (implements MemoryInterface)
+// GetMemory returns the memory manager
 func (s *Server) GetMemory() tools.MemoryInterface {
 	return s.memory
 }
 
-// GetConfig returns the server configuration (implements ConfigInterface)
+// GetConfig returns the server configuration
 func (s *Server) GetConfig() tools.ConfigInterface {
 	return s.config
 }
@@ -331,5 +331,123 @@ func (s *Server) registerTools() {
 			},
 		},
 		Handler: tools.DependencyAnalysisHandler,
+	})
+
+	// changed-files-context tool
+	s.tools.Register(&tools.Tool{
+		Name:        "changed-files-context",
+		Description: "Gets context from files changed in recent git commits",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"path": map[string]interface{}{
+					"type":        "string",
+					"description": "Project path (default: current directory)",
+				},
+				"commitCount": map[string]interface{}{
+					"type":        "integer",
+					"description": "Number of recent commits to analyze (default: 5)",
+				},
+				"maxFiles": map[string]interface{}{
+					"type":        "integer",
+					"description": "Maximum number of files to include (default: 10)",
+				},
+			},
+		},
+		Handler: tools.ChangedFilesContextHandler,
+	})
+
+	// search-memory tool
+	s.tools.Register(&tools.Tool{
+		Name:        "search-memory",
+		Description: "Advanced search through conversation memory with ranking by relevance, recency, and usage",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"query": map[string]interface{}{
+					"type":        "string",
+					"description": "Search query to match against memory content",
+				},
+				"tags": map[string]interface{}{
+					"type":        "array",
+					"description": "Filter by tags",
+					"items": map[string]interface{}{
+						"type": "string",
+					},
+				},
+				"limit": map[string]interface{}{
+					"type":        "integer",
+					"description": "Maximum number of results (default: 10)",
+				},
+			},
+		},
+		Handler: tools.SearchMemoryHandler,
+	})
+
+	// save-decision tool
+	s.tools.Register(&tools.Tool{
+		Name:        "save-decision",
+		Description: "Records a technical decision with structured metadata for future reference",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"key": map[string]interface{}{
+					"type":        "string",
+					"description": "Unique identifier for this decision",
+				},
+				"content": map[string]interface{}{
+					"type":        "string",
+					"description": "Description of the decision made",
+				},
+				"decisionType": map[string]interface{}{
+					"type":        "string",
+					"description": "Type: architecture, fix, approach, tech-debt, security, performance",
+				},
+				"reason": map[string]interface{}{
+					"type":        "string",
+					"description": "Why this decision was made",
+				},
+				"alternatives": map[string]interface{}{
+					"type":        "array",
+					"description": "Alternative approaches that were considered",
+					"items": map[string]interface{}{
+						"type": "string",
+					},
+				},
+				"tags": map[string]interface{}{
+					"type":        "array",
+					"description": "Additional tags",
+					"items": map[string]interface{}{
+						"type": "string",
+					},
+				},
+			},
+			"required": []string{"key", "content"},
+		},
+		Handler: tools.SaveDecisionHandler,
+	})
+
+	// get-decisions tool
+	s.tools.Register(&tools.Tool{
+		Name:        "get-decisions",
+		Description: "Retrieves technical decisions, optionally filtered by type or keyword",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"decisionType": map[string]interface{}{
+					"type":        "string",
+					"description": "Filter by decision type",
+				},
+				"keyword": map[string]interface{}{
+					"type":        "string",
+					"description": "Search keyword in decision content",
+				},
+				"limit": map[string]interface{}{
+					"type":        "integer",
+					"description": "Maximum number of results (default: 10)",
+				},
+			},
+		},
+		Handler: tools.GetDecisionsHandler,
 	})
 }

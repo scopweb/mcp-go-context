@@ -3,14 +3,17 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
-	"path/filepath"
-	"os"
-	"time"
-	"net/http"
 	"io"
+	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
+	"time"
+
+	"github.com/scopweb/mcp-go-context/internal/analyzer"
+	"github.com/scopweb/mcp-go-context/internal/memory"
 )
 
 // ServerInterface defines methods needed from the server
@@ -21,78 +24,30 @@ type ServerInterface interface {
 }
 
 type AnalyzerInterface interface {
-	AnalyzeProject(string, int) (*ProjectStructure, error)
+	AnalyzeProject(string, int) (*analyzer.ProjectStructure, error)
 	GetRelevantContext(string, []string, int) (string, error)
-	AnalyzeDependencies(bool) ([]Dependency, error)
+	AnalyzeDependencies(bool) ([]analyzer.Dependency, error)
+	GetRecentlyChangedFiles(string, int) ([]analyzer.ChangedFile, error)
 }
 
 type MemoryInterface interface {
 	Store(string, string, []string) error
-	Retrieve(string) (*Memory, error)
-	Search(string, []string) ([]*Memory, error)
+	StoreWithType(string, string, []string, string, string, []string) error
+	Retrieve(string) (*memory.Memory, error)
+	Search(string, []string) ([]*memory.Memory, error)
+	SearchDecisions(string, string, int) ([]*memory.Memory, error)
+	GetDecisionTypes() ([]string, error)
 }
 
 type ConfigInterface interface {
 	GetProjectPaths() []string
 }
 
-// Structs imported from memory and analyzer packages
-type Memory struct {
-	Key       string
-	Content   string
-	Tags      []string
-	Timestamp time.Time
-	Usage     int
-}
-type ProjectStructure struct {
-	RootPath     string
-	Files        []*FileInfo
-	Dependencies []Dependency
-	Structure    map[string][]string
-	Stats        ProjectStats
-}
-
-type FileInfo struct {
-	Path         string
-	Size         int64
-	Language     string
-	Imports      []string
-	Functions    []string
-	Types        []string
-	LastModified int64
-}
-
-type ProjectStats struct {
-	TotalFiles   int
-	TotalLines   int
-	Languages    map[string]int
-	TotalSize    int64
-	GoModules    []string
-	MainPackages []string
-}
-
-type Dependency struct {
-	Name    string
-	Version string
-	Type    string
-	Path    string
-}
-
-type MemoryEntry struct {
-	Key     string
-	Content string
-	Tags    []string
-	Created time.Time
-}
-
-// Convert memory.Memory to MemoryEntry for compatibility
-func convertMemoryToEntry(m *Memory) MemoryEntry {
-	return MemoryEntry{
-		Key:     m.Key,
-		Content: m.Content,
-		Tags:    m.Tags,
-		Created: m.Timestamp,
-	}
+func textResponse(text string) []map[string]interface{} {
+	return []map[string]interface{}{{
+		"type": "text",
+		"text": text,
+	}}
 }
 
 // Tool handler implementations
@@ -136,30 +91,37 @@ func AnalyzeProjectHandler(args json.RawMessage, server interface{}) (interface{
 	// Format comprehensive response
 	var result strings.Builder
 	result.WriteString(fmt.Sprintf("# Project Analysis: %s\n\n", structure.RootPath))
-	
+
 	// Stats summary
-	result.WriteString("## 📊 Project Statistics\n")
+	result.WriteString("## Project Statistics\n")
 	result.WriteString(fmt.Sprintf("- **Total Files**: %d\n", structure.Stats.TotalFiles))
 	result.WriteString(fmt.Sprintf("- **Total Size**: %.2f MB\n", float64(structure.Stats.TotalSize)/(1024*1024)))
-	
-	// Languages breakdown
-	result.WriteString("\n### Languages Distribution\n")
-	for lang, count := range structure.Stats.Languages {
-		percentage := float64(count) / float64(structure.Stats.TotalFiles) * 100
-		result.WriteString(fmt.Sprintf("- **%s**: %d files (%.1f%%)\n", lang, count, percentage))
+
+	if len(structure.Stats.Languages) > 0 {
+		totalFiles := structure.Stats.TotalFiles
+		if totalFiles == 0 {
+			totalFiles = 1
+		}
+		result.WriteString("\n### Languages Distribution\n")
+		for lang, count := range structure.Stats.Languages {
+			percentage := float64(count) / float64(totalFiles) * 100
+			result.WriteString(fmt.Sprintf("- **%s**: %d files (%.1f%%)\n", lang, count, percentage))
+		}
 	}
 
 	// Directory structure
-	result.WriteString("\n## 📁 Directory Structure\n")
-	for dir, files := range structure.Structure {
-		if len(files) > 0 {
-			result.WriteString(fmt.Sprintf("- `%s/` (%d files)\n", dir, len(files)))
+	if len(structure.Structure) > 0 {
+		result.WriteString("\n## Directory Structure\n")
+		for dir, files := range structure.Structure {
+			if len(files) > 0 {
+				result.WriteString(fmt.Sprintf("- `%s/` (%d files)\n", dir, len(files)))
+			}
 		}
 	}
 
 	// Dependencies
 	if len(structure.Dependencies) > 0 {
-		result.WriteString("\n## 📦 Dependencies\n")
+		result.WriteString("\n## Dependencies\n")
 		directDeps := 0
 		indirectDeps := 0
 		for _, dep := range structure.Dependencies {
@@ -171,7 +133,7 @@ func AnalyzeProjectHandler(args json.RawMessage, server interface{}) (interface{
 		}
 		result.WriteString(fmt.Sprintf("- **Direct**: %d dependencies\n", directDeps))
 		result.WriteString(fmt.Sprintf("- **Indirect**: %d dependencies\n", indirectDeps))
-		
+
 		// Show top dependencies
 		result.WriteString("\n### Key Dependencies\n")
 		count := 0
@@ -184,20 +146,17 @@ func AnalyzeProjectHandler(args json.RawMessage, server interface{}) (interface{
 	}
 
 	// Important files
-	result.WriteString("\n## 🔍 Key Files\n")
-	keyFiles := findKeyFiles(structure.Files)
-	for _, file := range keyFiles {
-		relPath, _ := filepath.Rel(structure.RootPath, file.Path)
-		result.WriteString(fmt.Sprintf("- `%s` (%s, %.2f KB)\n", 
-			relPath, file.Language, float64(file.Size)/1024))
+	if len(structure.Files) > 0 {
+		result.WriteString("\n## Key Files\n")
+		keyFiles := findKeyFiles(structure.Files)
+		for _, file := range keyFiles {
+			relPath, _ := filepath.Rel(structure.RootPath, file.Path)
+			result.WriteString(fmt.Sprintf("- `%s` (%s, %.2f KB)\n",
+				relPath, file.Language, float64(file.Size)/1024))
+		}
 	}
 
-	return []map[string]interface{}{
-		{
-			"type": "text",
-			"text": result.String(),
-		},
-	}, nil
+	return textResponse(result.String()), nil
 }
 
 // GetContextHandler - Complete implementation with smart context retrieval
@@ -231,11 +190,9 @@ func GetContextHandler(args json.RawMessage, server interface{}) (interface{}, e
 	if memory != nil {
 		memories, err := memory.Search(params.Query, []string{})
 		if err == nil && len(memories) > 0 {
-			context.WriteString("## 💭 Relevant Memory\n\n")
-			for i, mem := range memories {
-				if i >= 3 {
-					break
-				}
+			context.WriteString("## Relevant Memory\n\n")
+			for i := 0; i < min(3, len(memories)); i++ {
+				mem := memories[i]
 				context.WriteString(fmt.Sprintf("**%s**: %s\n\n", mem.Key, mem.Content))
 			}
 		}
@@ -252,17 +209,13 @@ func GetContextHandler(args json.RawMessage, server interface{}) (interface{}, e
 	// Add query-specific analysis
 	analysis := analyzeQuery(params.Query)
 	if analysis != "" {
-		context.WriteString("\n## 🔍 Query Analysis\n")
+		context.WriteString("\n## Query Analysis\n")
 		context.WriteString(analysis)
 	}
 
-	return []map[string]interface{}{
-		{
-			"type": "text",
-			"text": context.String(),
-		},
-	}, nil
+	return textResponse(context.String()), nil
 }
+
 // FetchDocsHandler - Context7-like API integration
 func FetchDocsHandler(args json.RawMessage, server interface{}) (interface{}, error) {
 	var params struct {
@@ -283,34 +236,19 @@ func FetchDocsHandler(args json.RawMessage, server interface{}) (interface{}, er
 	// Try Context7 API first
 	docs, err := fetchFromContext7(params.Library, params.Version, params.Topic, params.Tokens)
 	if err == nil && docs != "" {
-		return []map[string]interface{}{
-			{
-				"type": "text",
-				"text": docs,
-			},
-		}, nil
+		return textResponse(docs), nil
 	}
 
 	// Fallback to local documentation search
 	localDocs := searchLocalDocs(params.Library, params.Topic)
 	if localDocs != "" {
-		return []map[string]interface{}{
-			{
-				"type": "text",
-				"text": fmt.Sprintf("# Local Documentation for %s\n\n%s", params.Library, localDocs),
-			},
-		}, nil
+		return textResponse(fmt.Sprintf("# Local Documentation for %s\n\n%s", params.Library, localDocs)), nil
 	}
 
 	// Generate basic library info
 	basicInfo := generateLibraryInfo(params.Library, params.Version)
-	
-	return []map[string]interface{}{
-		{
-			"type": "text",
-			"text": basicInfo,
-		},
-	}, nil
+
+	return textResponse(basicInfo), nil
 }
 
 // RememberConversationHandler - Enhanced memory storage
@@ -345,13 +283,7 @@ func RememberConversationHandler(args json.RawMessage, server interface{}) (inte
 		return createErrorResponse(fmt.Sprintf("Failed to store memory: %v", err))
 	}
 
-	return []map[string]interface{}{
-		{
-			"type": "text",
-			"text": fmt.Sprintf("✅ Successfully stored memory '%s' with tags: %v", 
-				params.Key, params.Tags),
-		},
-	}, nil
+	return textResponse(fmt.Sprintf("Stored memory '%s' with tags: %v", params.Key, params.Tags)), nil
 }
 
 // DependencyAnalysisHandler - Complete dependency analysis
@@ -371,23 +303,23 @@ func DependencyAnalysisHandler(args json.RawMessage, server interface{}) (interf
 		return createErrorResponse("Server interface error")
 	}
 
-	analyzer := srv.GetAnalyzer()
-	if analyzer == nil {
+	analyzerSvc := srv.GetAnalyzer()
+	if analyzerSvc == nil {
 		return createErrorResponse("Analyzer not available")
 	}
 
-	deps, err := analyzer.AnalyzeDependencies(params.IncludeTransitive && !params.OnlyDirect)
+	deps, err := analyzerSvc.AnalyzeDependencies(params.IncludeTransitive && !params.OnlyDirect)
 	if err != nil {
 		return createErrorResponse(fmt.Sprintf("Dependency analysis failed: %v", err))
 	}
 
 	var result strings.Builder
-	result.WriteString("# 📦 Dependency Analysis\n\n")
+	result.WriteString("# Dependency Analysis\n\n")
 
 	// Categorize dependencies
-	directDeps := []Dependency{}
-	indirectDeps := []Dependency{}
-	
+	var directDeps []analyzer.Dependency
+	var indirectDeps []analyzer.Dependency
+
 	for _, dep := range deps {
 		if dep.Type == "direct" {
 			directDeps = append(directDeps, dep)
@@ -403,7 +335,7 @@ func DependencyAnalysisHandler(args json.RawMessage, server interface{}) (interf
 		if params.SuggestDocs {
 			docSuggestion := suggestDocumentation(dep.Name)
 			if docSuggestion != "" {
-				result.WriteString(fmt.Sprintf(" - [📚 Docs](%s)", docSuggestion))
+				result.WriteString(fmt.Sprintf(" - [Docs](%s)", docSuggestion))
 			}
 		}
 		result.WriteString("\n")
@@ -423,78 +355,69 @@ func DependencyAnalysisHandler(args json.RawMessage, server interface{}) (interf
 	}
 
 	// Security and update recommendations
-	result.WriteString("\n## 🔍 Recommendations\n\n")
+	result.WriteString("\n## Recommendations\n\n")
 	recommendations := generateDepRecommendations(directDeps)
 	for _, rec := range recommendations {
 		result.WriteString(fmt.Sprintf("- %s\n", rec))
 	}
 
-	return []map[string]interface{}{
-		{
-			"type": "text",
-			"text": result.String(),
-		},
-	}, nil
+	return textResponse(result.String()), nil
 }
+
 // Helper functions
 
 func createErrorResponse(message string) ([]map[string]interface{}, error) {
-	return []map[string]interface{}{
-		{
-			"type": "text",
-			"text": fmt.Sprintf("❌ Error: %s", message),
-		},
-	}, nil
+	return textResponse(fmt.Sprintf("Error: %s", message)), nil
 }
 
-func findKeyFiles(files []*FileInfo) []*FileInfo {
-	keyFiles := []*FileInfo{}
-	
+func findKeyFiles(files []*analyzer.FileInfo) []*analyzer.FileInfo {
+	keyFiles := []*analyzer.FileInfo{}
+
 	for _, file := range files {
 		fileName := filepath.Base(file.Path)
-		
+
 		// Key file patterns
-		if fileName == "main.go" || fileName == "README.md" || 
-		   fileName == "go.mod" || fileName == "Dockerfile" ||
-		   strings.Contains(fileName, "config") ||
-		   strings.Contains(fileName, "server") {
+		if fileName == "main.go" || fileName == "README.md" ||
+			fileName == "go.mod" || fileName == "Dockerfile" ||
+			strings.Contains(fileName, "config") ||
+			strings.Contains(fileName, "server") {
 			keyFiles = append(keyFiles, file)
 		}
 	}
-	
+
 	// Sort by relevance (size, type, etc.)
 	sort.Slice(keyFiles, func(i, j int) bool {
 		return keyFiles[i].Size > keyFiles[j].Size
 	})
-	
+
 	if len(keyFiles) > 10 {
 		return keyFiles[:10]
 	}
-	
+
 	return keyFiles
 }
 
 func analyzeQuery(query string) string {
 	query = strings.ToLower(query)
-	
+
 	// Pattern matching for different query types
 	patterns := map[string]string{
-		"error|bug|fix|debug":           "🐛 Debugging context - Look for error handling, logs, and related functions",
-		"test|testing|unit":             "🧪 Testing context - Focus on test files and testing utilities",
-		"api|endpoint|route|handler":    "🌐 API context - Examine route handlers and API definitions", 
-		"database|db|sql|query":         "💾 Database context - Check database models and queries",
-		"config|configuration|setting":  "⚙️ Configuration context - Look at config files and environment setup",
-		"deploy|deployment|docker":      "🚀 Deployment context - Focus on deployment and infrastructure files",
-		"security|auth|permission":      "🔒 Security context - Examine authentication and authorization code",
-		"performance|optimize|slow":     "⚡ Performance context - Look for bottlenecks and optimization opportunities",
+		"error|bug|fix|debug":          "Debugging context: look for error handling, logs, and related functions.",
+		"test|testing|unit":            "Testing context: focus on test files and testing utilities.",
+		"api|endpoint|route|handler":   "API context: examine route handlers and API definitions.",
+		"database|db|sql|query":        "Database context: check database models and queries.",
+		"config|configuration|setting": "Configuration context: review config files and environment setup.",
+		"deploy|deployment|docker":     "Deployment context: focus on deployment and infrastructure files.",
+		"security|auth|permission":     "Security context: examine authentication and authorization code.",
+		"performance|optimize|slow":    "Performance context: look for bottlenecks and optimization opportunities.",
 	}
-	
+
 	for pattern, description := range patterns {
 		if matched, _ := regexp.MatchString(pattern, query); matched {
 			return description + "\n"
 		}
 	}
-	
+
 	return ""
 }
 
@@ -502,7 +425,7 @@ func fetchFromContext7(library, version, topic string, tokens int) (string, erro
 	// Context7 API integration
 	baseURL := "https://context7.com/api/v1"
 	var url string
-	
+
 	if library != "" {
 		url = fmt.Sprintf("%s/%s", baseURL, library)
 		if version != "" {
@@ -511,13 +434,13 @@ func fetchFromContext7(library, version, topic string, tokens int) (string, erro
 	} else {
 		return "", fmt.Errorf("library name required")
 	}
-	
+
 	// Add query parameters
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return "", err
 	}
-	
+
 	q := req.URL.Query()
 	if topic != "" {
 		q.Add("topic", topic)
@@ -525,30 +448,30 @@ func fetchFromContext7(library, version, topic string, tokens int) (string, erro
 	q.Add("tokens", fmt.Sprintf("%d", tokens))
 	q.Add("type", "txt")
 	req.URL.RawQuery = q.Encode()
-	
+
 	req.Header.Set("X-Context7-Source", "mcp-server-go")
-	
+
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("API returned status %d", resp.StatusCode)
 	}
-	
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
-	
+
 	content := string(body)
 	if content == "No content available" || content == "No context data available" {
 		return "", fmt.Errorf("no documentation available")
 	}
-	
+
 	return content, nil
 }
 
@@ -556,18 +479,18 @@ func searchLocalDocs(library, topic string) string {
 	// Search for local documentation
 	searchPaths := []string{
 		"./docs",
-		"./doc", 
+		"./doc",
 		"./README.md",
 		"./readme.md",
 		"./documentation",
 	}
-	
+
 	for _, path := range searchPaths {
 		if content := searchInPath(path, library, topic); content != "" {
 			return content
 		}
 	}
-	
+
 	return ""
 }
 
@@ -575,7 +498,7 @@ func searchInPath(path, library, topic string) string {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return ""
 	}
-	
+
 	// Simple file content search
 	if strings.HasSuffix(path, ".md") {
 		content, err := os.ReadFile(path)
@@ -586,20 +509,20 @@ func searchInPath(path, library, topic string) string {
 			}
 		}
 	}
-	
+
 	return ""
 }
 
 func generateLibraryInfo(library, version string) string {
 	// Generate basic library information
 	var info strings.Builder
-	
+
 	info.WriteString(fmt.Sprintf("# Library Information: %s\n\n", library))
-	
+
 	if version != "" {
 		info.WriteString(fmt.Sprintf("**Version**: %s\n\n", version))
 	}
-	
+
 	// Try to determine library type
 	if strings.Contains(library, "gin") {
 		info.WriteString("**Type**: Go Web Framework\n")
@@ -615,92 +538,92 @@ func generateLibraryInfo(library, version string) string {
 		info.WriteString("**Type**: Library/Package\n")
 		info.WriteString("**Description**: External dependency\n")
 	}
-	
+
 	info.WriteString("\n**Note**: For detailed documentation, consider using official sources or package documentation.\n")
-	
+
 	return info.String()
 }
 
 func generateTags(content string) []string {
 	content = strings.ToLower(content)
 	tags := []string{}
-	
+
 	// Common tag patterns
 	tagPatterns := map[string]string{
-		"error|bug|issue|problem":    "bug",
-		"test|testing|spec":          "testing", 
-		"config|configuration":       "config",
-		"api|endpoint|route":         "api",
-		"database|db|sql":            "database",
-		"deploy|deployment":          "deployment",
-		"security|auth":              "security",
-		"performance|optimize":       "performance",
-		"feature|functionality":      "feature",
-		"documentation|docs":         "docs",
+		"error|bug|issue|problem": "bug",
+		"test|testing|spec":       "testing",
+		"config|configuration":    "config",
+		"api|endpoint|route":      "api",
+		"database|db|sql":         "database",
+		"deploy|deployment":       "deployment",
+		"security|auth":           "security",
+		"performance|optimize":    "performance",
+		"feature|functionality":   "feature",
+		"documentation|docs":      "docs",
 	}
-	
+
 	for pattern, tag := range tagPatterns {
 		if matched, _ := regexp.MatchString(pattern, content); matched {
 			tags = append(tags, tag)
 		}
 	}
-	
+
 	if len(tags) == 0 {
 		tags = append(tags, "general")
 	}
-	
+
 	return tags
 }
 
 func suggestDocumentation(depName string) string {
 	// Common Go library documentation URLs
 	docMap := map[string]string{
-		"gin-gonic/gin":     "https://gin-gonic.com/docs/",
-		"gorilla/mux":       "https://pkg.go.dev/github.com/gorilla/mux",
-		"lib/pq":            "https://pkg.go.dev/github.com/lib/pq",
+		"gin-gonic/gin":       "https://gin-gonic.com/docs/",
+		"gorilla/mux":         "https://pkg.go.dev/github.com/gorilla/mux",
+		"lib/pq":              "https://pkg.go.dev/github.com/lib/pq",
 		"go-sql-driver/mysql": "https://pkg.go.dev/github.com/go-sql-driver/mysql",
-		"go-redis/redis":    "https://redis.uptrace.dev/",
-		"sirupsen/logrus":   "https://pkg.go.dev/github.com/sirupsen/logrus",
-		"stretchr/testify":  "https://pkg.go.dev/github.com/stretchr/testify",
+		"go-redis/redis":      "https://redis.uptrace.dev/",
+		"sirupsen/logrus":     "https://pkg.go.dev/github.com/sirupsen/logrus",
+		"stretchr/testify":    "https://pkg.go.dev/github.com/stretchr/testify",
 	}
-	
+
 	for key, url := range docMap {
 		if strings.Contains(depName, key) {
 			return url
 		}
 	}
-	
+
 	// Default to pkg.go.dev
 	return fmt.Sprintf("https://pkg.go.dev/%s", depName)
 }
 
-func generateDepRecommendations(deps []Dependency) []string {
+func generateDepRecommendations(deps []analyzer.Dependency) []string {
 	recommendations := []string{}
-	
+
 	// Check for common security recommendations
 	for _, dep := range deps {
 		if strings.Contains(dep.Name, "crypto") || strings.Contains(dep.Name, "security") {
-			recommendations = append(recommendations, 
-				fmt.Sprintf("🔒 Review security implementation for %s", dep.Name))
+			recommendations = append(recommendations,
+				fmt.Sprintf("Review security implementation for %s", dep.Name))
 		}
-		
+
 		if strings.Contains(dep.Name, "test") {
-			recommendations = append(recommendations, 
-				"🧪 Ensure adequate test coverage with testing libraries")
+			recommendations = append(recommendations,
+				"Ensure adequate test coverage with testing libraries")
 		}
-		
+
 		if strings.Contains(dep.Name, "http") || strings.Contains(dep.Name, "gin") {
-			recommendations = append(recommendations, 
-				"🌐 Implement proper rate limiting and security headers for web services")
+			recommendations = append(recommendations,
+				"Implement proper rate limiting and security headers for web services")
 		}
 	}
-	
+
 	// General recommendations
-	recommendations = append(recommendations, 
-		"📊 Regularly update dependencies to latest stable versions",
-		"🔍 Use `go mod tidy` to clean up unused dependencies",
-		"📋 Consider using `go mod audit` for security vulnerability checks")
-	
+	recommendations = append(recommendations,
+		"Regularly update dependencies to latest stable versions",
+		"Use `go mod tidy` to clean up unused dependencies",
+		"Consider using `go mod audit` for security vulnerability checks")
+
 	return recommendations
 }
 
@@ -709,4 +632,286 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// ChangedFilesContextHandler - Gets context from recently changed files
+func ChangedFilesContextHandler(args json.RawMessage, server interface{}) (interface{}, error) {
+	var params struct {
+		Path        string `json:"path"`
+		CommitCount int    `json:"commitCount"`
+		MaxFiles    int    `json:"maxFiles"`
+	}
+
+	if err := json.Unmarshal(args, &params); err != nil {
+		return nil, fmt.Errorf("invalid parameters: %w", err)
+	}
+
+	// Defaults
+	if params.Path == "" {
+		params.Path = "."
+	}
+	if params.CommitCount == 0 {
+		params.CommitCount = 5
+	}
+	if params.MaxFiles == 0 {
+		params.MaxFiles = 10
+	}
+
+	srv, ok := server.(ServerInterface)
+	if !ok {
+		return createErrorResponse("Server interface error")
+	}
+
+	analyzerSvc := srv.GetAnalyzer()
+	if analyzerSvc == nil {
+		return createErrorResponse("Analyzer not available")
+	}
+
+	// Get recently changed files
+	changedFiles, err := analyzerSvc.GetRecentlyChangedFiles(params.Path, params.CommitCount)
+	if err != nil {
+		return createErrorResponse(fmt.Sprintf("Failed to get changed files: %v", err))
+	}
+
+	if len(changedFiles) == 0 {
+		return textResponse("No recent changes found in git history"), nil
+	}
+
+	var result strings.Builder
+	result.WriteString("# Recently Changed Files Context\n\n")
+	result.WriteString(fmt.Sprintf("Analyzing last %d commits\n\n", params.CommitCount))
+
+	// Limit files
+	if len(changedFiles) > params.MaxFiles {
+		changedFiles = changedFiles[:params.MaxFiles]
+	}
+
+	result.WriteString(fmt.Sprintf("## Changed Files (%d)\n\n", len(changedFiles)))
+	for _, f := range changedFiles {
+		path := f.Path
+		status := f.Status
+		result.WriteString(fmt.Sprintf("- `%s` (%s)\n", path, status))
+	}
+
+	// Add content summary for each file
+	result.WriteString("\n## File Summaries\n\n")
+	for _, f := range changedFiles {
+		path := f.Path
+		fullPath := filepath.Join(params.Path, path)
+		if content, err := os.ReadFile(fullPath); err == nil {
+			lines := strings.Split(string(content), "\n")
+			previewLines := min(10, len(lines))
+			result.WriteString(fmt.Sprintf("### %s\n\n", path))
+			result.WriteString("```" + toolDetectLanguage(path) + "\n")
+			result.WriteString(strings.Join(lines[:previewLines], "\n"))
+			if len(lines) > previewLines {
+				result.WriteString("\n...")
+			}
+			result.WriteString("\n```\n\n")
+		}
+	}
+
+	return textResponse(result.String()), nil
+}
+
+// toolDetectLanguage detects language from file extension
+func toolDetectLanguage(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	langMap := map[string]string{
+		".go":    "go",
+		".js":    "javascript",
+		".ts":    "typescript",
+		".py":    "python",
+		".java":  "java",
+		".c":     "c",
+		".cpp":   "cpp",
+		".rs":    "rust",
+		".rb":    "ruby",
+		".php":   "php",
+		".cs":    "csharp",
+		".swift": "swift",
+		".kt":    "kotlin",
+		".md":    "markdown",
+		".json":  "json",
+		".yaml":  "yaml",
+		".yml":   "yaml",
+		".xml":   "xml",
+		".html":  "html",
+		".css":   "css",
+		".sql":   "sql",
+		".sh":    "bash",
+	}
+	if lang, exists := langMap[ext]; exists {
+		return lang
+	}
+	return "text"
+}
+
+// SearchMemoryHandler - Advanced memory search with ranking
+func SearchMemoryHandler(args json.RawMessage, server interface{}) (interface{}, error) {
+	var params struct {
+		Query string   `json:"query"`
+		Tags  []string `json:"tags"`
+		Limit int      `json:"limit"`
+	}
+
+	if err := json.Unmarshal(args, &params); err != nil {
+		return nil, fmt.Errorf("invalid parameters: %w", err)
+	}
+
+	if params.Limit == 0 {
+		params.Limit = 10
+	}
+
+	srv, ok := server.(ServerInterface)
+	if !ok {
+		return createErrorResponse("Server interface error")
+	}
+
+	memory := srv.GetMemory()
+	if memory == nil {
+		return createErrorResponse("Memory manager not available")
+	}
+
+	results, err := memory.Search(params.Query, params.Tags)
+	if err != nil {
+		return createErrorResponse(fmt.Sprintf("Search failed: %v", err))
+	}
+
+	if len(results) == 0 {
+		return textResponse("No memories found matching your query"), nil
+	}
+
+	items := results
+	if len(items) > params.Limit {
+		items = items[:params.Limit]
+	}
+
+	return textResponse(formatSearchResults(items)), nil
+}
+
+// SaveDecisionHandler - Stores a technical decision with structured metadata
+func SaveDecisionHandler(args json.RawMessage, server interface{}) (interface{}, error) {
+	var params struct {
+		Key          string   `json:"key"`
+		Content      string   `json:"content"`
+		DecisionType string   `json:"decisionType"` // architecture, fix, approach, tech-debt, etc.
+		Reason       string   `json:"reason"`       // why this decision was made
+		Alternatives []string `json:"alternatives"` // what else was considered
+		Tags         []string `json:"tags"`
+	}
+
+	if err := json.Unmarshal(args, &params); err != nil {
+		return nil, fmt.Errorf("invalid parameters: %w", err)
+	}
+
+	if params.Key == "" || params.Content == "" {
+		return createErrorResponse("key and content are required")
+	}
+
+	// Default decision type
+	if params.DecisionType == "" {
+		params.DecisionType = "technical"
+	}
+
+	// Auto-generate tags if not provided
+	if len(params.Tags) == 0 {
+		params.Tags = []string{"decision", params.DecisionType}
+	}
+
+	srv, ok := server.(ServerInterface)
+	if !ok {
+		return createErrorResponse("Server interface error")
+	}
+
+	memory := srv.GetMemory()
+	if memory == nil {
+		return createErrorResponse("Memory manager not available")
+	}
+
+	err := memory.StoreWithType(params.Key, params.Content, params.Tags, params.DecisionType, params.Reason, params.Alternatives)
+	if err != nil {
+		return createErrorResponse(fmt.Sprintf("Failed to save decision: %v", err))
+	}
+
+	return textResponse(fmt.Sprintf("Decision saved successfully:\n- Key: %s\n- Type: %s\n- Tags: %v", params.Key, params.DecisionType, params.Tags)), nil
+}
+
+// GetDecisionsHandler - Retrieves decisions with optional filtering
+func GetDecisionsHandler(args json.RawMessage, server interface{}) (interface{}, error) {
+	var params struct {
+		DecisionType string `json:"decisionType"`
+		Keyword      string `json:"keyword"`
+		Limit        int    `json:"limit"`
+	}
+
+	if err := json.Unmarshal(args, &params); err != nil {
+		return nil, fmt.Errorf("invalid parameters: %w", err)
+	}
+
+	if params.Limit == 0 {
+		params.Limit = 10
+	}
+
+	srv, ok := server.(ServerInterface)
+	if !ok {
+		return createErrorResponse("Server interface error")
+	}
+
+	memory := srv.GetMemory()
+	if memory == nil {
+		return createErrorResponse("Memory manager not available")
+	}
+
+	results, err := memory.SearchDecisions(params.DecisionType, params.Keyword, params.Limit)
+	if err != nil {
+		return createErrorResponse(fmt.Sprintf("Failed to get decisions: %v", err))
+	}
+
+	if len(results) == 0 {
+		return textResponse("No decisions found matching your criteria"), nil
+	}
+
+	var result strings.Builder
+	result.WriteString("# Technical Decisions\n\n")
+
+	for _, mem := range results {
+		result.WriteString(fmt.Sprintf("## %s\n", mem.Key))
+		result.WriteString(fmt.Sprintf("**Type**: %s\n", mem.DecisionType))
+		result.WriteString(fmt.Sprintf("**Created**: %s\n\n", mem.Timestamp.Format("2006-01-02 15:04")))
+		result.WriteString(mem.Content + "\n\n")
+		if mem.Reason != "" {
+			result.WriteString(fmt.Sprintf("**Reason**: %s\n\n", mem.Reason))
+		}
+		if len(mem.Alternatives) > 0 {
+			result.WriteString("**Alternatives considered**:\n")
+			for _, alt := range mem.Alternatives {
+				result.WriteString(fmt.Sprintf("- %s\n", alt))
+			}
+			result.WriteString("\n")
+		}
+		result.WriteString("---\n\n")
+	}
+
+	return textResponse(result.String()), nil
+}
+
+// formatSearchResults formats memory search results for display
+func formatSearchResults(items []*memory.Memory) string {
+	if len(items) == 0 {
+		return "No results found"
+	}
+
+	var result strings.Builder
+	result.WriteString("# Memory Search Results\n\n")
+	result.WriteString(fmt.Sprintf("Found %d results:\n\n", len(items)))
+
+	for _, item := range items {
+		result.WriteString(fmt.Sprintf("## %s\n", item.Key))
+		result.WriteString(fmt.Sprintf("**Tags**: %v\n", item.Tags))
+		result.WriteString(fmt.Sprintf("**Usage**: %d times\n", item.Usage))
+		result.WriteString(fmt.Sprintf("**Content**:\n%s\n\n", item.Content))
+	}
+
+	return result.String()
 }

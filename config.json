@@ -9,7 +9,7 @@
     "projectPaths": ["."],
     "ignorePatterns": [
       "*.log",
-      "*.tmp", 
+      "*.tmp",
       "node_modules",
       ".git",
       "vendor",
@@ -26,14 +26,17 @@
   },
   "cache": {
     "enabled": true,
-    "directory": "~/.mcp-context/cache",
+    "directory": "$HOME/.mcp-go-context/cache",
     "maxSizeMB": 500,
     "ttlMinutes": 1440
   },
   "memory": {
     "enabled": true,
-    "storagePath": "~/.mcp-context/memory",
-    "maxSessions": 100,
-    "sessionTTLDays": 30
+    "persistent": true,
+    "storagePath": "$HOME/.mcp-go-context/memory",
+    "maxEntries": 1000,
+    "maxResults": 10,
+    "sessionTTLDays": 30,
+    "maxSessions": 100
   }
 }

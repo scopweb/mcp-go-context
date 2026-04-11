@@ -2,15 +2,19 @@ package analyzer
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"go/parser"
 	"go/token"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
-	"github.com/scopweb/mcp-context-server/internal/config"
+	"github.com/scopweb/mcp-go-context/internal/config"
 )
 
 // ProjectAnalyzer analyzes project structure and content
@@ -28,6 +32,7 @@ type FileInfo struct {
 	Functions    []string
 	Types        []string
 	LastModified int64
+	Score        int // Relevance score for queries
 }
 
 // ProjectStructure represents the analyzed project
@@ -55,6 +60,23 @@ type Dependency struct {
 	Version string
 	Type    string // direct, indirect
 	Path    string
+}
+
+// ChangedFile represents a file changed in git
+type ChangedFile struct {
+	Path     string
+	Status   string // added, modified, deleted, renamed
+	OldPath  string // for renamed files
+	Lines    int
+	SelfAuthorship bool // committed by the author themselves
+}
+
+// GitInfo contains git repository information
+type GitInfo struct {
+	ChangedFiles []ChangedFile
+	CommitCount  int
+	LastCommit   string
+	Branch       string
 }
 
 // New creates a new project analyzer
@@ -240,13 +262,39 @@ func (a *ProjectAnalyzer) AnalyzeDependencies(includeTransitive bool) ([]Depende
 	// Check for go.mod
 	goModPath := filepath.Join(a.config.ProjectPaths[0], "go.mod")
 	if _, err := os.Stat(goModPath); err == nil {
-		deps, err = a.parseGoMod(goModPath, includeTransitive)
+		goDeps, err := a.parseGoMod(goModPath, includeTransitive)
 		if err != nil {
 			return nil, err
 		}
+		deps = append(deps, goDeps...)
 	}
 
-	// TODO: Add support for other dependency files (package.json, requirements.txt, etc.)
+	// Check for package.json (Node.js)
+	pkgPath := filepath.Join(a.config.ProjectPaths[0], "package.json")
+	if _, err := os.Stat(pkgPath); err == nil {
+		pkgDeps, err := a.parsePackageJSON(pkgPath, includeTransitive)
+		if err == nil {
+			deps = append(deps, pkgDeps...)
+		}
+	}
+
+	// Check for pyproject.toml (Python)
+	pyprojectPath := filepath.Join(a.config.ProjectPaths[0], "pyproject.toml")
+	if _, err := os.Stat(pyprojectPath); err == nil {
+		pyDeps, err := a.parsePyproject(pyprojectPath, includeTransitive)
+		if err == nil {
+			deps = append(deps, pyDeps...)
+		}
+	}
+
+	// Check for requirements.txt (Python)
+	requirementsPath := filepath.Join(a.config.ProjectPaths[0], "requirements.txt")
+	if _, err := os.Stat(requirementsPath); err == nil {
+		reqDeps, err := a.parseRequirements(requirementsPath, includeTransitive)
+		if err == nil {
+			deps = append(deps, reqDeps...)
+		}
+	}
 
 	return deps, nil
 }
@@ -310,6 +358,252 @@ func (a *ProjectAnalyzer) parseGoMod(path string, includeTransitive bool) ([]Dep
 	return deps, scanner.Err()
 }
 
+// parsePackageJSON parses package.json for npm dependencies
+func (a *ProjectAnalyzer) parsePackageJSON(path string, includeTransitive bool) ([]Dependency, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	// Simple JSON parsing without external dependencies
+	var pkg struct {
+		Dependencies    map[string]string `json:"dependencies"`
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return nil, err
+	}
+
+	var deps []Dependency
+
+	// Add regular dependencies
+	for name, version := range pkg.Dependencies {
+		deps = append(deps, Dependency{
+			Name:    name,
+			Version: version,
+			Type:    "direct",
+			Path:    path,
+		})
+	}
+
+	// Add dev dependencies if including transitive
+	if includeTransitive {
+		for name, version := range pkg.DevDependencies {
+			deps = append(deps, Dependency{
+				Name:    name,
+				Version: version,
+				Type:    "direct",
+				Path:    path,
+			})
+		}
+	}
+
+	return deps, nil
+}
+
+// parsePyproject parses pyproject.toml for Python dependencies
+func (a *ProjectAnalyzer) parsePyproject(path string, includeTransitive bool) ([]Dependency, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	content := string(data)
+	var deps []Dependency
+
+	// Simple TOML parsing for common dependency sections.
+	// Supports PEP 621 `[project] dependencies = [...]` and table-based formats.
+	lines := strings.Split(content, "\n")
+
+	inProjectSection := false
+	inDeps := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		if line == "[project]" {
+			inProjectSection = true
+			inDeps = false
+			continue
+		}
+
+		// Detect dependency sections
+		if strings.HasPrefix(line, "[project.dependencies]") ||
+			strings.HasPrefix(line, "[tool.poetry.dependencies]") ||
+			strings.HasPrefix(line, "[project.optional-dependencies]") ||
+			strings.HasPrefix(line, "[tool pdm.dev-dependencies]") {
+			inProjectSection = false
+			inDeps = true
+			continue
+		}
+
+		// End of section
+		if strings.HasPrefix(line, "[") {
+			inProjectSection = false
+			inDeps = false
+			continue
+		}
+
+		if inProjectSection && strings.HasPrefix(line, "dependencies = [") {
+			for _, dep := range parsePyprojectArray(line) {
+				deps = append(deps, Dependency{
+					Name:    dep.Name,
+					Version: dep.Version,
+					Type:    "direct",
+					Path:    path,
+				})
+			}
+			continue
+		}
+
+		if inDeps {
+			// Parse dependency line (format: package-name = "version" or package-name>=version)
+			if idx := strings.Index(line, "="); idx > 0 {
+				name := strings.TrimSpace(line[:idx])
+				name = strings.ReplaceAll(name, "\"", "")
+				name = strings.ReplaceAll(name, "'", "")
+
+				rest := strings.TrimSpace(line[idx+1:])
+				version := strings.TrimSpace(rest)
+				version = strings.ReplaceAll(version, "\"", "")
+				version = strings.ReplaceAll(version, "'", "")
+
+				// Clean name (remove extras like [extra])
+				if idx := strings.Index(name, "["); idx > 0 {
+					name = name[:idx]
+				}
+
+				deps = append(deps, Dependency{
+					Name:    name,
+					Version: version,
+					Type:    "direct",
+					Path:    path,
+				})
+			}
+		}
+	}
+
+	return deps, nil
+}
+
+func parsePyprojectArray(line string) []Dependency {
+	start := strings.Index(line, "[")
+	end := strings.LastIndex(line, "]")
+	if start < 0 || end <= start {
+		return nil
+	}
+
+	rawItems := strings.Split(line[start+1:end], ",")
+	deps := make([]Dependency, 0, len(rawItems))
+	for _, item := range rawItems {
+		item = strings.Trim(strings.TrimSpace(item), "\"'")
+		if item == "" {
+			continue
+		}
+
+		name, version := splitRequirement(item)
+		deps = append(deps, Dependency{Name: name, Version: version})
+	}
+
+	return deps
+}
+
+func splitRequirement(req string) (string, string) {
+	operators := []string{"==", ">=", "<=", "~=", "!=", ">", "<"}
+	for _, op := range operators {
+		if idx := strings.Index(req, op); idx >= 0 {
+			return strings.TrimSpace(req[:idx]), strings.TrimSpace(req[idx:])
+		}
+	}
+	return strings.TrimSpace(req), "any"
+}
+
+// parseRequirements parses requirements.txt for Python dependencies
+func (a *ProjectAnalyzer) parseRequirements(path string, includeTransitive bool) ([]Dependency, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	var deps []Dependency
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Skip options like -r, -e, --index-url, etc.
+		if strings.HasPrefix(line, "-") {
+			continue
+		}
+
+		// Skip git+https:// style deps (we can't resolve them easily)
+		if strings.Contains(line, "git+") {
+			continue
+		}
+
+		// Parse package==version or package>=version style
+		var name, version string
+
+		if idx := strings.Index(line, "=="); idx >= 0 {
+			parts := strings.SplitN(line, "==", 2)
+			name = strings.TrimSpace(parts[0])
+			version = "==" + strings.TrimSpace(parts[1])
+		} else if idx := strings.Index(line, ">="); idx >= 0 {
+			parts := strings.SplitN(line, ">=", 2)
+			name = strings.TrimSpace(parts[0])
+			version = ">=" + strings.TrimSpace(parts[1])
+		} else if idx := strings.Index(line, "<="); idx >= 0 {
+			parts := strings.SplitN(line, "<=", 2)
+			name = strings.TrimSpace(parts[0])
+			version = "<=" + strings.TrimSpace(parts[1])
+		} else if idx := strings.Index(line, "~="); idx >= 0 {
+			parts := strings.SplitN(line, "~=", 2)
+			name = strings.TrimSpace(parts[0])
+			version = "~=" + strings.TrimSpace(parts[1])
+		} else if idx := strings.Index(line, "!="); idx >= 0 {
+			parts := strings.SplitN(line, "!=", 2)
+			name = strings.TrimSpace(parts[0])
+			version = "!=" + strings.TrimSpace(parts[1])
+		} else if idx := strings.Index(line, ">"); idx >= 0 {
+			parts := strings.SplitN(line, ">", 2)
+			name = strings.TrimSpace(parts[0])
+			version = ">" + strings.TrimSpace(parts[1])
+		} else if idx := strings.Index(line, "<"); idx >= 0 {
+			parts := strings.SplitN(line, "<", 2)
+			name = strings.TrimSpace(parts[0])
+			version = "<" + strings.TrimSpace(parts[1])
+		} else {
+			// No version specified
+			name = line
+			version = "any"
+		}
+
+		// Clean package name (remove [extra] notation)
+		if idx := strings.Index(name, "["); idx > 0 {
+			name = name[:idx]
+		}
+
+		if name != "" {
+			deps = append(deps, Dependency{
+				Name:    name,
+				Version: version,
+				Type:    "direct",
+				Path:    path,
+			})
+		}
+	}
+
+	return deps, scanner.Err()
+}
+
 // Helper methods
 
 func (a *ProjectAnalyzer) shouldIgnore(path string) bool {
@@ -343,12 +637,24 @@ func (a *ProjectAnalyzer) findRelevantFiles(query string) []*FileInfo {
 			}
 		}
 
+		// Boost score for recently modified files
+		if file.LastModified > 0 {
+			// Files modified in last 7 days get a boost
+			if time.Now().Unix()-file.LastModified < 7*24*60*60 {
+				score += 3
+			}
+		}
+
 		if score > 0 {
+			file.Score = score
 			relevant = append(relevant, file)
 		}
 	}
 
-	// Sort by relevance (implement sorting if needed)
+	// Sort by relevance score (highest first)
+	sort.Slice(relevant, func(i, j int) bool {
+		return relevant[i].Score > relevant[j].Score
+	})
 
 	return relevant
 }
@@ -406,4 +712,147 @@ func detectLanguage(path string) string {
 	}
 
 	return "text"
+}
+
+// GetGitInfo returns git repository information for a project
+func (a *ProjectAnalyzer) GetGitInfo(rootPath string) (*GitInfo, error) {
+	absPath, err := filepath.Abs(rootPath)
+	if err != nil {
+		return nil, fmt.Errorf("invalid path: %w", err)
+	}
+
+	// Check if it's a git repo
+	gitDir := filepath.Join(absPath, ".git")
+	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
+		return nil, nil // Not a git repo, not an error
+	}
+
+	info := &GitInfo{
+		ChangedFiles: []ChangedFile{},
+	}
+
+	// Get current branch
+	branch, err := a.runGitCommand(absPath, "rev-parse", "--abbrev-ref", "HEAD")
+	if err == nil {
+		info.Branch = strings.TrimSpace(branch)
+	}
+
+	// Get last commit hash
+	commit, err := a.runGitCommand(absPath, "rev-parse", "HEAD")
+	if err == nil {
+		info.LastCommit = strings.TrimSpace(commit)[:12]
+	}
+
+	// Get commit count
+	count, err := a.runGitCommand(absPath, "rev-list", "--count", "HEAD")
+	if err == nil {
+		fmt.Sscanf(strings.TrimSpace(count), "%d", &info.CommitCount)
+	}
+
+	// Get changed files from last commit
+	output, err := a.runGitCommand(absPath, "diff", "--name-status", "HEAD~1", "HEAD")
+	if err == nil {
+		info.ChangedFiles = a.parseChangedFiles(output)
+	}
+
+	return info, nil
+}
+
+// GetRecentlyChangedFiles returns files changed in the last N commits
+func (a *ProjectAnalyzer) GetRecentlyChangedFiles(rootPath string, commitCount int) ([]ChangedFile, error) {
+	absPath, err := filepath.Abs(rootPath)
+	if err != nil {
+		return nil, fmt.Errorf("invalid path: %w", err)
+	}
+
+	gitDir := filepath.Join(absPath, ".git")
+	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
+		return nil, nil
+	}
+
+	// Get files changed in last N commits
+	commitRange := fmt.Sprintf("HEAD~%d..HEAD", commitCount)
+	output, err := a.runGitCommand(absPath, "diff", "--name-status", commitRange)
+	if err != nil {
+		return nil, nil
+	}
+
+	return a.parseChangedFiles(output), nil
+}
+
+func (a *ProjectAnalyzer) runGitCommand(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(output), nil
+}
+
+func (a *ProjectAnalyzer) parseChangedFiles(output string) []ChangedFile {
+	var files []ChangedFile
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		parts := strings.Split(line, "\t")
+		if len(parts) < 2 {
+			continue
+		}
+
+		status := normalizeGitStatus(parts[0])
+		file := ChangedFile{Status: status}
+
+		if strings.HasPrefix(parts[0], "R") && len(parts) >= 3 {
+			file.OldPath = parts[1]
+			file.Path = parts[2]
+		} else {
+			file.Path = parts[1]
+		}
+
+		files = append(files, file)
+	}
+	return files
+}
+
+func normalizeGitStatus(status string) string {
+	if status == "" {
+		return "modified"
+	}
+
+	switch status[0] {
+	case 'A':
+		return "added"
+	case 'D':
+		return "deleted"
+	case 'R':
+		return "renamed"
+	default:
+		return "modified"
+	}
+}
+
+// boostFromGit boosts file scores based on git change history
+func (a *ProjectAnalyzer) boostFromGit(relevant []*FileInfo, rootPath string) {
+	gitInfo, err := a.GetGitInfo(rootPath)
+	if err != nil || gitInfo == nil {
+		return
+	}
+
+	// Create a map of recently changed files
+	changedMap := make(map[string]bool)
+	for _, cf := range gitInfo.ChangedFiles {
+		changedMap[filepath.Base(cf.Path)] = true
+	}
+
+	// Boost files that were recently changed
+	for _, file := range relevant {
+		if changedMap[filepath.Base(file.Path)] {
+			file.Score += 5 // Extra boost for recently changed files
+		}
+	}
 }

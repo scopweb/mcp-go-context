@@ -1,0 +1,363 @@
+package analyzer
+
+import (
+	"os"
+	"testing"
+
+	"github.com/scopweb/mcp-go-context/internal/config"
+)
+
+func TestDetectLanguage(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected string
+	}{
+		{"main.go", "go"},
+		{"server.ts", "typescript"},
+		{"app.py", "python"},
+		{"index.html", "html"},
+		{"style.css", "css"},
+		{"query.sql", "sql"},
+		{"script.sh", "bash"},
+		{"data.json", "json"},
+		{"config.yaml", "yaml"},
+		{"readme.md", "markdown"},
+		{"unknown.xyz", "text"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			result := detectLanguage(tt.path)
+			if result != tt.expected {
+				t.Errorf("detectLanguage(%q) = %q, want %q", tt.path, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestParseGoMod(t *testing.T) {
+	// Create a temp go.mod file
+	content := `module example.com/test
+
+go 1.21
+
+require (
+	github.com/gin-gonic/gin v1.9.1
+	github.com/go-sql-driver/mysql v1.7.1
+)
+
+require (
+	 golang.org/x/net v0.17.0 // indirect
+)
+`
+	tmpDir := t.TempDir()
+	goModPath := tmpDir + "/go.mod"
+	if err := writeFile(goModPath, content); err != nil {
+		t.Fatalf("failed to write temp go.mod: %v", err)
+	}
+
+	cfg := config.ContextConfig{
+		ProjectPaths: []string{tmpDir},
+	}
+	a := &ProjectAnalyzer{config: cfg}
+
+	deps, err := a.parseGoMod(goModPath, false)
+	if err != nil {
+		t.Fatalf("parseGoMod() failed: %v", err)
+	}
+
+	// Should find at least 2 direct dependencies
+	if len(deps) < 2 {
+		t.Errorf("expected at least 2 dependencies, got %d", len(deps))
+	}
+
+	// Find gin and mysql
+	found := make(map[string]bool)
+	for _, dep := range deps {
+		found[dep.Name] = true
+	}
+
+	if !found["github.com/gin-gonic/gin"] {
+		t.Error("did not find github.com/gin-gonic/gin in deps")
+	}
+
+	if !found["github.com/go-sql-driver/mysql"] {
+		t.Error("did not find github.com/go-sql-driver/mysql in deps")
+	}
+}
+
+func TestParsePackageJSON(t *testing.T) {
+	content := `{
+		"name": "myproject",
+		"dependencies": {
+			"express": "^4.18.2",
+			"lodash": "^4.17.21"
+		},
+		"devDependencies": {
+			"jest": "^29.0.0"
+		}
+	}`
+	tmpDir := t.TempDir()
+	pkgPath := tmpDir + "/package.json"
+	if err := writeFile(pkgPath, content); err != nil {
+		t.Fatalf("failed to write temp package.json: %v", err)
+	}
+
+	cfg := config.ContextConfig{}
+	a := &ProjectAnalyzer{config: cfg}
+
+	deps, err := a.parsePackageJSON(pkgPath, false)
+	if err != nil {
+		t.Fatalf("parsePackageJSON() failed: %v", err)
+	}
+
+	if len(deps) != 2 {
+		t.Errorf("expected 2 dependencies, got %d", len(deps))
+	}
+
+	// Should have express and lodash but not jest (dev dep with includeTransitive=false)
+	for _, dep := range deps {
+		if dep.Name == "express" {
+			return
+		}
+	}
+	t.Error("did not find express dependency")
+}
+
+func TestParsePackageJSONWithDevDeps(t *testing.T) {
+	content := `{
+		"name": "myproject",
+		"dependencies": {
+			"express": "^4.18.2"
+		},
+		"devDependencies": {
+			"jest": "^29.0.0"
+		}
+	}`
+	tmpDir := t.TempDir()
+	pkgPath := tmpDir + "/package.json"
+	if err := writeFile(pkgPath, content); err != nil {
+		t.Fatalf("failed to write temp package.json: %v", err)
+	}
+
+	cfg := config.ContextConfig{}
+	a := &ProjectAnalyzer{config: cfg}
+
+	// With includeTransitive=true, should include devDependencies
+	deps, err := a.parsePackageJSON(pkgPath, true)
+	if err != nil {
+		t.Fatalf("parsePackageJSON() failed: %v", err)
+	}
+
+	if len(deps) != 2 {
+		t.Errorf("expected 2 dependencies with dev deps, got %d", len(deps))
+	}
+}
+
+func TestParseRequirements(t *testing.T) {
+	content := `requests==2.31.0
+numpy>=1.24.0
+pandas~=1.5.0
+# this is a comment
+-e git+https://github.com/user/repo.git
+flask
+`
+	tmpDir := t.TempDir()
+	reqPath := tmpDir + "/requirements.txt"
+	if err := writeFile(reqPath, content); err != nil {
+		t.Fatalf("failed to write temp requirements.txt: %v", err)
+	}
+
+	cfg := config.ContextConfig{}
+	a := &ProjectAnalyzer{config: cfg}
+
+	deps, err := a.parseRequirements(reqPath, false)
+	if err != nil {
+		t.Fatalf("parseRequirements() failed: %v", err)
+	}
+
+	if len(deps) < 4 {
+		t.Errorf("expected at least 4 dependencies, got %d", len(deps))
+	}
+
+	// Check requests with exact version
+	var requestsDep *Dependency
+	for i := range deps {
+		if deps[i].Name == "requests" {
+			requestsDep = &deps[i]
+			break
+		}
+	}
+	if requestsDep == nil {
+		t.Error("did not find requests dependency")
+	} else if requestsDep.Version != "==2.31.0" {
+		t.Errorf("expected requests version ==2.31.0, got %s", requestsDep.Version)
+	}
+
+	// Check flask with "any" version
+	var flaskDep *Dependency
+	for i := range deps {
+		if deps[i].Name == "flask" {
+			flaskDep = &deps[i]
+			break
+		}
+	}
+	if flaskDep == nil {
+		t.Error("did not find flask dependency")
+	} else if flaskDep.Version != "any" {
+		t.Errorf("expected flask version 'any', got %s", flaskDep.Version)
+	}
+}
+
+func TestParsePyproject(t *testing.T) {
+	content := `[project.dependencies]
+requests = "^2.31.0"
+numpy = ">=1.24.0"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+django = "^4.0"
+
+[project.optional-dependencies]
+dev = "pytest>=7.0.0"
+`
+	tmpDir := t.TempDir()
+	pyprojectPath := tmpDir + "/pyproject.toml"
+	if err := writeFile(pyprojectPath, content); err != nil {
+		t.Fatalf("failed to write temp pyproject.toml: %v", err)
+	}
+
+	cfg := config.ContextConfig{}
+	a := &ProjectAnalyzer{config: cfg}
+
+	deps, err := a.parsePyproject(pyprojectPath, false)
+	if err != nil {
+		t.Fatalf("parsePyproject() failed: %v", err)
+	}
+
+	if len(deps) < 4 {
+		t.Errorf("expected at least 4 dependencies, got %d", len(deps))
+	}
+
+	// Should have requests, numpy, python, django
+	names := make(map[string]bool)
+	for _, dep := range deps {
+		names[dep.Name] = true
+	}
+
+	expected := []string{"requests", "numpy", "python", "django"}
+	for _, name := range expected {
+		if !names[name] {
+			t.Errorf("expected to find %q in dependencies", name)
+		}
+	}
+}
+
+func TestParsePyprojectProjectArray(t *testing.T) {
+	content := `[project]
+dependencies = ["requests>=2.31.0", "numpy", "pydantic<3"]
+`
+	tmpDir := t.TempDir()
+	pyprojectPath := tmpDir + "/pyproject.toml"
+	if err := writeFile(pyprojectPath, content); err != nil {
+		t.Fatalf("failed to write temp pyproject.toml: %v", err)
+	}
+
+	a := &ProjectAnalyzer{config: config.ContextConfig{}}
+
+	deps, err := a.parsePyproject(pyprojectPath, false)
+	if err != nil {
+		t.Fatalf("parsePyproject() failed: %v", err)
+	}
+
+	if len(deps) != 3 {
+		t.Fatalf("expected 3 dependencies, got %d", len(deps))
+	}
+
+	if deps[0].Name != "requests" || deps[0].Version != ">=2.31.0" {
+		t.Fatalf("unexpected first dependency: %+v", deps[0])
+	}
+
+	if deps[1].Name != "numpy" || deps[1].Version != "any" {
+		t.Fatalf("unexpected second dependency: %+v", deps[1])
+	}
+}
+
+func TestParseChangedFilesNameStatus(t *testing.T) {
+	a := &ProjectAnalyzer{}
+	files := a.parseChangedFiles("A\tnew.go\nM\tinternal/app.go\nR100\told.go\tnewer.go\nD\tdead.go\n")
+
+	if len(files) != 4 {
+		t.Fatalf("expected 4 changed files, got %d", len(files))
+	}
+
+	if files[0].Status != "added" || files[0].Path != "new.go" {
+		t.Fatalf("unexpected added file: %+v", files[0])
+	}
+
+	if files[2].Status != "renamed" || files[2].OldPath != "old.go" || files[2].Path != "newer.go" {
+		t.Fatalf("unexpected renamed file: %+v", files[2])
+	}
+}
+
+func TestFindRelevantFiles(t *testing.T) {
+	cfg := config.ContextConfig{
+		IgnorePatterns: []string{"*.log", "*.tmp"},
+	}
+	a := &ProjectAnalyzer{
+		config: cfg,
+		cache: make(map[string]*FileInfo),
+	}
+
+	// Add some files to cache
+	a.cache["/test/main.go"] = &FileInfo{
+		Path:         "/test/main.go",
+		Language:     "go",
+		LastModified: 0,
+	}
+	a.cache["/test/server.go"] = &FileInfo{
+		Path:         "/test/server.go",
+		Language:     "go",
+		LastModified: 0,
+	}
+	a.cache["/test/README.md"] = &FileInfo{
+		Path:         "/test/README.md",
+		Language:     "markdown",
+		LastModified: 0,
+	}
+
+	results := a.findRelevantFiles("main")
+	if len(results) == 0 {
+		t.Fatal("expected at least one result for 'main' query")
+	}
+
+	if results[0].Path != "/test/main.go" {
+		t.Errorf("expected main.go, got %s", results[0].Path)
+	}
+}
+
+func TestFindRelevantFilesWithScore(t *testing.T) {
+	cfg := config.ContextConfig{}
+	a := &ProjectAnalyzer{
+		config: cfg,
+		cache: make(map[string]*FileInfo),
+	}
+
+	a.cache["/test/gin-server.go"] = &FileInfo{
+		Path: "/test/gin-server.go",
+	}
+
+	results := a.findRelevantFiles("gin")
+	if len(results) == 0 {
+		t.Fatal("expected at least one result for 'gin' query")
+	}
+
+	if results[0].Score == 0 {
+		t.Error("expected non-zero score for matching file")
+	}
+}
+
+// Helper function to write files
+func writeFile(path, content string) error {
+	return os.WriteFile(path, []byte(content), 0644)
+}

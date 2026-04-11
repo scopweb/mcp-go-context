@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Config represents the server configuration
@@ -68,14 +69,14 @@ func DefaultConfig() *Config {
 		},
 		Cache: CacheConfig{
 			Enabled:    true,
-			Directory:  filepath.Join(homeDir, ".mcp-context", "cache"),
+			Directory:  filepath.Join(homeDir, ".mcp-go-context", "cache"),
 			MaxSizeMB:  500,
 			TTLMinutes: 1440, // 24 hours
 		},
 		Memory: MemoryConfig{
 			Enabled:        true,
 			Persistent:     true,
-			StoragePath:    filepath.Join(homeDir, ".mcp-context", "memory.json"),
+			StoragePath:    filepath.Join(homeDir, ".mcp-go-context", "memory"),
 			MaxEntries:     1000,
 			MaxResults:     10,
 			SessionTTLDays: 30,
@@ -104,7 +105,36 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	// Expand environment variables and ~ in paths
+	cfg.Memory.StoragePath = expandPath(cfg.Memory.StoragePath)
+	cfg.Cache.Directory = expandPath(cfg.Cache.Directory)
+
+	// Validate and fix StoragePath if it appears to be a file path
+	if cfg.Memory.StoragePath != "" {
+		if info, err := os.Stat(cfg.Memory.StoragePath); err == nil && !info.IsDir() {
+			// It's a file, not a directory - convert to directory by taking parent
+			cfg.Memory.StoragePath = filepath.Dir(cfg.Memory.StoragePath)
+		}
+	}
+
+	// Ensure at least one project path
+	if len(cfg.Context.ProjectPaths) == 0 {
+		cfg.Context.ProjectPaths = []string{"."}
+	}
+
 	return cfg, nil
+}
+
+// expandPath expands ~ to home directory and environment variables
+func expandPath(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		if homeDir, err := os.UserHomeDir(); err == nil {
+			path = filepath.Join(homeDir, path[2:])
+		}
+	}
+	// Also expand $HOME style variables
+	path = os.ExpandEnv(path)
+	return path
 }
 
 // Save saves configuration to file
