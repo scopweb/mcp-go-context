@@ -3,12 +3,18 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 )
 
 // Transport defines the interface for MCP transports
 type Transport interface {
 	Start(ctx context.Context, info ServerInfo, handler RequestHandler) error
 	Stop() error
+}
+
+// HTTPRouteConfigurer allows transports with an HTTP multiplexer to expose extra routes.
+type HTTPRouteConfigurer interface {
+	SetRouteRegistrar(func(*http.ServeMux))
 }
 
 // RequestHandler processes incoming requests

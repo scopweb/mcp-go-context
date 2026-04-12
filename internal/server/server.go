@@ -8,6 +8,7 @@ import (
 
 	"github.com/scopweb/mcp-go-context/internal/analyzer"
 	"github.com/scopweb/mcp-go-context/internal/config"
+	"github.com/scopweb/mcp-go-context/internal/dashboard"
 	"github.com/scopweb/mcp-go-context/internal/memory"
 	"github.com/scopweb/mcp-go-context/internal/tools"
 	"github.com/scopweb/mcp-go-context/internal/transport"
@@ -50,6 +51,11 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to create memory manager: %w", err)
 	}
 
+	dashboardHandler, err := dashboard.New(memoryManager)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create dashboard handler: %w", err)
+	}
+
 	// Create server
 	srv := &Server{
 		config:    cfg,
@@ -57,6 +63,10 @@ func New(cfg *config.Config) (*Server, error) {
 		analyzer:  projectAnalyzer,
 		memory:    memoryManager,
 		tools:     tools.NewRegistry(),
+	}
+
+	if routeConfigurer, ok := trans.(transport.HTTPRouteConfigurer); ok {
+		routeConfigurer.SetRouteRegistrar(dashboardHandler.RegisterRoutes)
 	}
 
 	// Register tools

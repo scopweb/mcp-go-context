@@ -12,10 +12,11 @@ import (
 
 // SSETransport implements MCP over Server-Sent Events
 type SSETransport struct {
-	port     int
-	server   *http.Server
-	sessions map[string]*sseSession
-	mu       sync.RWMutex
+	port           int
+	server         *http.Server
+	sessions       map[string]*sseSession
+	mu             sync.RWMutex
+	routeRegistrar func(*http.ServeMux)
 }
 
 type sseSession struct {
@@ -34,9 +35,17 @@ func NewSSETransport(port int) Transport {
 	}
 }
 
+// SetRouteRegistrar provides extra HTTP routes to register before the server starts.
+func (s *SSETransport) SetRouteRegistrar(register func(*http.ServeMux)) {
+	s.routeRegistrar = register
+}
+
 // Start begins the SSE server
 func (s *SSETransport) Start(ctx context.Context, info ServerInfo, handler RequestHandler) error {
 	mux := http.NewServeMux()
+	if s.routeRegistrar != nil {
+		s.routeRegistrar(mux)
+	}
 
 	// SSE endpoint for establishing connection
 	mux.HandleFunc("/sse", func(w http.ResponseWriter, r *http.Request) {

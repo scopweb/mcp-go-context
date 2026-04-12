@@ -72,6 +72,28 @@ Add to your `.cursor/mcp.json`:
 }
 ```
 
+### Dashboard de memorias
+
+El dashboard web de memorias se expone solo cuando el servidor arranca con transporte `http` o `sse`. Si usas `stdio`, las herramientas MCP siguen funcionando, pero no se publica interfaz web.
+
+Ejemplo mínimo en `config.json`:
+
+```json
+{
+  "transport": {
+    "type": "http",
+    "port": 3000
+  }
+}
+```
+
+Con esa configuración, inicia el servidor y abre:
+
+- `http://localhost:3000/dashboard` para la interfaz web
+- `http://localhost:3000/api/memories` para la API JSON de consulta
+
+El dashboard permite buscar memorias guardadas, filtrar por tipo de decisión, revisar uso/recencia y eliminar entradas. Todos los datos se sirven localmente desde el propio proceso Go.
+
 ## 🛠️ Available Tools
 
 ### 📊 `analyze-project`

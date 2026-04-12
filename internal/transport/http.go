@@ -9,8 +9,9 @@ import (
 
 // HTTPTransport implements MCP over HTTP
 type HTTPTransport struct {
-	port   int
-	server *http.Server
+	port           int
+	server         *http.Server
+	routeRegistrar func(*http.ServeMux)
 }
 
 // NewHTTPTransport creates a new HTTP transport
@@ -20,9 +21,17 @@ func NewHTTPTransport(port int) Transport {
 	}
 }
 
+// SetRouteRegistrar provides extra HTTP routes to register before the server starts.
+func (t *HTTPTransport) SetRouteRegistrar(register func(*http.ServeMux)) {
+	t.routeRegistrar = register
+}
+
 // Start begins the HTTP server
 func (t *HTTPTransport) Start(ctx context.Context, info ServerInfo, handler RequestHandler) error {
 	mux := http.NewServeMux()
+	if t.routeRegistrar != nil {
+		t.routeRegistrar(mux)
+	}
 
 	// MCP endpoint
 	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
@@ -59,8 +68,8 @@ func (t *HTTPTransport) Start(ctx context.Context, info ServerInfo, handler Requ
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status": "ok",
-			"server": info.Name,
+			"status":  "ok",
+			"server":  info.Name,
 			"version": info.Version,
 		})
 	})

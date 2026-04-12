@@ -20,8 +20,8 @@ type Manager struct {
 	sessions map[string]*Session
 	mu       sync.RWMutex
 	// Inverted indexes for fast search
-	tagIndex     map[string]map[string]bool // tag -> set of memory keys
-	wordIndex    map[string]map[string]bool // word -> set of memory keys
+	tagIndex         map[string]map[string]bool // tag -> set of memory keys
+	wordIndex        map[string]map[string]bool // word -> set of memory keys
 	lastIndexRebuild time.Time
 }
 
@@ -41,9 +41,9 @@ type Memory struct {
 	Timestamp time.Time `json:"timestamp"`
 	Usage     int       `json:"usage"`
 	// Decision-specific fields
-	DecisionType string    `json:"decisionType,omitempty"` // architecture, fix, approach, etc.
-	Reason      string    `json:"reason,omitempty"`       // why this decision was made
-	Alternatives []string `json:"alternatives,omitempty"`  // what else was considered
+	DecisionType string   `json:"decisionType,omitempty"` // architecture, fix, approach, etc.
+	Reason       string   `json:"reason,omitempty"`       // why this decision was made
+	Alternatives []string `json:"alternatives,omitempty"` // what else was considered
 }
 
 // SearchResult represents a scored search result
@@ -55,9 +55,9 @@ type SearchResult struct {
 // New creates a new memory manager
 func New(cfg config.MemoryConfig) (*Manager, error) {
 	m := &Manager{
-		config:   cfg,
-		sessions: make(map[string]*Session),
-		tagIndex: make(map[string]map[string]bool),
+		config:    cfg,
+		sessions:  make(map[string]*Session),
+		tagIndex:  make(map[string]map[string]bool),
 		wordIndex: make(map[string]map[string]bool),
 	}
 
@@ -257,6 +257,60 @@ func (m *Manager) GetRecentMemories(limit int) ([]*Memory, error) {
 	}
 
 	return allMemories, nil
+}
+
+// ListMemories returns all memories sorted by recency, optionally filtered by decision type.
+func (m *Manager) ListMemories(limit int, decisionType string) ([]*Memory, error) {
+	if !m.config.Enabled {
+		return nil, fmt.Errorf("memory disabled")
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var allMemories []*Memory
+	for _, session := range m.sessions {
+		for _, memory := range session.Memories {
+			if decisionType != "" && memory.DecisionType != decisionType {
+				continue
+			}
+			memoryCopy := memory
+			allMemories = append(allMemories, &memoryCopy)
+		}
+	}
+
+	sort.Slice(allMemories, func(i, j int) bool {
+		return allMemories[i].Timestamp.After(allMemories[j].Timestamp)
+	})
+
+	if limit > 0 && len(allMemories) > limit {
+		return allMemories[:limit], nil
+	}
+
+	return allMemories, nil
+}
+
+// Delete removes a memory by key from whichever session contains it.
+func (m *Manager) Delete(key string) error {
+	if !m.config.Enabled {
+		return fmt.Errorf("memory disabled")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, session := range m.sessions {
+		memory, exists := session.Memories[key]
+		if !exists {
+			continue
+		}
+
+		m.removeFromIndexes(key, memory)
+		delete(session.Memories, key)
+		return m.saveSession(session)
+	}
+
+	return fmt.Errorf("memory not found: %s", key)
 }
 
 // Clear removes all memories

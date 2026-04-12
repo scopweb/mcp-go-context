@@ -256,7 +256,7 @@ func TestTokenize(t *testing.T) {
 	}{
 		{"hello world", 2},
 		{"golang is fast and simple", 3}, // should filter stop words
-		{"the quick brown fox", 3},      // "the" filtered
+		{"the quick brown fox", 3},       // "the" filtered
 		{"API gateway design pattern", 4},
 	}
 
@@ -432,5 +432,67 @@ func TestCleanupRemovesIndexEntriesForExpiredSessions(t *testing.T) {
 
 	if len(m.tagIndex) != 0 || len(m.wordIndex) != 0 {
 		t.Fatalf("expected indexes to be empty after cleanup, got tags=%v words=%v", m.tagIndex, m.wordIndex)
+	}
+}
+
+func TestListMemoriesFiltersByDecisionType(t *testing.T) {
+	cfg := config.MemoryConfig{
+		Enabled:        true,
+		StoragePath:    t.TempDir(),
+		MaxEntries:     100,
+		MaxResults:     10,
+		SessionTTLDays: 30,
+	}
+
+	m, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+
+	if err := m.StoreWithType("dec-1", "Use PostgreSQL", []string{"db"}, "architecture", "", nil); err != nil {
+		t.Fatalf("StoreWithType() failed: %v", err)
+	}
+	if err := m.StoreWithType("dec-2", "Fix retry logic", []string{"bug"}, "fix", "", nil); err != nil {
+		t.Fatalf("StoreWithType() failed: %v", err)
+	}
+
+	results, err := m.ListMemories(0, "architecture")
+	if err != nil {
+		t.Fatalf("ListMemories() failed: %v", err)
+	}
+
+	if len(results) != 1 || results[0].Key != "dec-1" {
+		t.Fatalf("unexpected filtered memories: %+v", results)
+	}
+}
+
+func TestDeleteRemovesMemoryAndIndexes(t *testing.T) {
+	cfg := config.MemoryConfig{
+		Enabled:        true,
+		StoragePath:    t.TempDir(),
+		MaxEntries:     100,
+		MaxResults:     10,
+		SessionTTLDays: 30,
+	}
+
+	m, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+
+	if err := m.Store("delete-key", "delete me", []string{"cleanup"}); err != nil {
+		t.Fatalf("Store() failed: %v", err)
+	}
+
+	if err := m.Delete("delete-key"); err != nil {
+		t.Fatalf("Delete() failed: %v", err)
+	}
+
+	if _, err := m.Retrieve("delete-key"); err == nil {
+		t.Fatal("expected deleted memory to be unavailable")
+	}
+
+	if len(m.tagIndex) != 0 || len(m.wordIndex) != 0 {
+		t.Fatalf("expected indexes to be empty after delete, got tags=%v words=%v", m.tagIndex, m.wordIndex)
 	}
 }
