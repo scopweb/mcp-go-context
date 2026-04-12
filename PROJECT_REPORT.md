@@ -3,7 +3,7 @@
 ## 🎯 Project Overview
 
 **Project Name**: MCP Context Server  
-**Version**: 1.0.0  
+**Version**: 1.1.0  
 **Language**: Go  
 **Purpose**: Advanced context management for AI coding assistants  
 **Status**: ✅ **COMPLETE & PRODUCTION READY**

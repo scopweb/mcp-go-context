@@ -3,12 +3,12 @@
 echo "🔨 Building MCP Context Server..."
 
 # Set build variables
-VERSION="1.0.0"
+VERSION="1.1.0"
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "dev")
 BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # Build flags
-LDFLAGS="-X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}"
+LDFLAGS="-X github.com/scopweb/mcp-go-context/internal/buildinfo.Version=${VERSION} -X github.com/scopweb/mcp-go-context/internal/buildinfo.Commit=${COMMIT} -X github.com/scopweb/mcp-go-context/internal/buildinfo.BuildTime=${BUILD_TIME}"
 
 # Create bin directory
 mkdir -p bin

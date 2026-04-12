@@ -1,0 +1,7 @@
+package buildinfo
+
+var (
+	Version   = "1.1.0"
+	Commit    = "dev"
+	BuildTime = ""
+)

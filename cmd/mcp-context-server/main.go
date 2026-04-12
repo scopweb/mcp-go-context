@@ -9,13 +9,9 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/scopweb/mcp-go-context/internal/buildinfo"
 	"github.com/scopweb/mcp-go-context/internal/config"
 	"github.com/scopweb/mcp-go-context/internal/server"
-)
-
-var (
-	version = "1.0.0"
-	commit  = "dev"
 )
 
 func main() {
@@ -30,7 +26,7 @@ func main() {
 	flag.Parse()
 
 	if *showVer {
-		fmt.Printf("MCP Context Server v%s (commit: %s)\n", version, commit)
+		fmt.Printf("MCP Context Server v%s (commit: %s)\n", buildinfo.Version, buildinfo.Commit)
 		os.Exit(0)
 	}
 
@@ -73,7 +69,7 @@ func main() {
 	}()
 
 	// Start server
-	log.Printf("Starting MCP Context Server v%s on %s...", version, cfg.Transport.Type)
+	log.Printf("Starting MCP Context Server v%s on %s...", buildinfo.Version, cfg.Transport.Type)
 	if err := srv.Start(ctx); err != nil {
 		log.Fatalf("Server error: %v", err)
 	}

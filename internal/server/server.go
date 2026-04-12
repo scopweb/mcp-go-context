@@ -7,6 +7,7 @@ import (
 	"log"
 
 	"github.com/scopweb/mcp-go-context/internal/analyzer"
+	"github.com/scopweb/mcp-go-context/internal/buildinfo"
 	"github.com/scopweb/mcp-go-context/internal/config"
 	"github.com/scopweb/mcp-go-context/internal/dashboard"
 	"github.com/scopweb/mcp-go-context/internal/memory"
@@ -80,7 +81,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// Initialize server info
 	info := transport.ServerInfo{
 		Name:    "MCP Context Server",
-		Version: "1.0.0",
+		Version: buildinfo.Version,
 		Instructions: `This server provides intelligent context management for coding assistance.
 It analyzes your project, fetches relevant documentation, and maintains conversation memory.`,
 	}
@@ -168,7 +169,7 @@ func (s *Server) handleInitialize(id interface{}) (interface{}, error) {
 		},
 		"serverInfo": map[string]string{
 			"name":    "MCP Context Server",
-			"version": "1.0.0",
+			"version": buildinfo.Version,
 		},
 	}, nil
 }

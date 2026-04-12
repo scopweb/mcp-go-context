@@ -2,10 +2,10 @@
 
 # Variables
 BINARY_NAME=mcp-context-server
-VERSION?=1.0.0
+VERSION?=1.1.0
 COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
 BUILD_TIME=$(shell date +%FT%T%z)
-LDFLAGS=-ldflags "-X main.version=${VERSION} -X main.commit=${COMMIT}"
+LDFLAGS=-ldflags "-X github.com/scopweb/mcp-go-context/internal/buildinfo.Version=${VERSION} -X github.com/scopweb/mcp-go-context/internal/buildinfo.Commit=${COMMIT} -X github.com/scopweb/mcp-go-context/internal/buildinfo.BuildTime=${BUILD_TIME}"
 
 # Build the binary
 build:

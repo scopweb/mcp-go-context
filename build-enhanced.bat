@@ -2,12 +2,12 @@
 echo 🔨 Building MCP Context Server...
 
 rem Set build variables
-set VERSION=1.0.0
+set VERSION=1.1.0
 for /f %%i in ('git rev-parse --short HEAD 2^>nul') do set COMMIT=%%i
 if "%COMMIT%"=="" set COMMIT=dev
 
 rem Build flags
-set LDFLAGS=-X main.version=%VERSION% -X main.commit=%COMMIT%
+set LDFLAGS=-X github.com/scopweb/mcp-go-context/internal/buildinfo.Version=%VERSION% -X github.com/scopweb/mcp-go-context/internal/buildinfo.Commit=%COMMIT%
 
 rem Create bin directory
 if not exist bin mkdir bin
