@@ -394,6 +394,43 @@ func TestRetrieveIncrementsStoredUsage(t *testing.T) {
 	}
 }
 
+func TestRetrievePersistsUsageToDisk(t *testing.T) {
+	cfg := config.MemoryConfig{
+		Enabled:        true,
+		StoragePath:    t.TempDir(),
+		MaxEntries:     100,
+		MaxResults:     10,
+		SessionTTLDays: 30,
+	}
+
+	m, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+
+	if err := m.Store("persisted-usage", "track me", []string{"usage"}); err != nil {
+		t.Fatalf("Store() failed: %v", err)
+	}
+
+	if _, err := m.Retrieve("persisted-usage"); err != nil {
+		t.Fatalf("Retrieve() failed: %v", err)
+	}
+
+	reloaded, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() reload failed: %v", err)
+	}
+
+	mem, err := reloaded.Get("persisted-usage")
+	if err != nil {
+		t.Fatalf("Get() failed after reload: %v", err)
+	}
+
+	if mem.Usage != 1 {
+		t.Fatalf("expected persisted usage 1, got %d", mem.Usage)
+	}
+}
+
 func TestCleanupRemovesIndexEntriesForExpiredSessions(t *testing.T) {
 	cfg := config.MemoryConfig{
 		Enabled:        true,

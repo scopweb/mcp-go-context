@@ -28,51 +28,7 @@ func (t *HTTPTransport) SetRouteRegistrar(register func(*http.ServeMux)) {
 
 // Start begins the HTTP server
 func (t *HTTPTransport) Start(ctx context.Context, info ServerInfo, handler RequestHandler) error {
-	mux := http.NewServeMux()
-	if t.routeRegistrar != nil {
-		t.routeRegistrar(mux)
-	}
-
-	// MCP endpoint
-	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		// Set CORS headers
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		w.Header().Set("Content-Type", "application/json")
-
-		// Read request
-		var reqData json.RawMessage
-		if err := json.NewDecoder(r.Body).Decode(&reqData); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
-			return
-		}
-
-		// Handle request
-		respData, err := handler(ctx, reqData)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		// Send response
-		w.Write(respData)
-	})
-
-	// Health check
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":  "ok",
-			"server":  info.Name,
-			"version": info.Version,
-		})
-	})
+	mux := t.newMux(ctx, info, handler)
 
 	t.server = &http.Server{
 		Addr:    fmt.Sprintf(":%d", t.port),
@@ -92,6 +48,57 @@ func (t *HTTPTransport) Start(ctx context.Context, info ServerInfo, handler Requ
 	case err := <-errChan:
 		return err
 	}
+}
+
+func (t *HTTPTransport) newMux(ctx context.Context, info ServerInfo, handler RequestHandler) *http.ServeMux {
+	mux := http.NewServeMux()
+	if t.routeRegistrar != nil {
+		t.routeRegistrar(mux)
+	}
+
+	// MCP endpoint
+	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+
+		var reqData json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&reqData); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		respData, err := handler(ctx, reqData)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Write(respData)
+	})
+
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "ok",
+			"server":  info.Name,
+			"version": info.Version,
+		})
+	})
+
+	return mux
 }
 
 // Stop shuts down the HTTP server

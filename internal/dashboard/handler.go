@@ -547,7 +547,7 @@ func (h *Handler) handleMemoryByKey(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "key": key})
 	case http.MethodGet:
-		mem, err := h.memory.Retrieve(key)
+		mem, err := h.memory.Get(key)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return

@@ -145,7 +145,29 @@ func (m *Manager) Retrieve(key string) (*Memory, error) {
 			// Increment usage in the stored value, not just in a copy.
 			memory.Usage++
 			session.Memories[key] = memory
+			if err := m.saveSession(session); err != nil {
+				return nil, err
+			}
 			return &memory, nil
+		}
+	}
+
+	return nil, fmt.Errorf("memory not found: %s", key)
+}
+
+// Get returns a memory item by key without mutating usage statistics.
+func (m *Manager) Get(key string) (*Memory, error) {
+	if !m.config.Enabled {
+		return nil, fmt.Errorf("memory disabled")
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, session := range m.sessions {
+		if memory, exists := session.Memories[key]; exists {
+			memoryCopy := memory
+			return &memoryCopy, nil
 		}
 	}
 

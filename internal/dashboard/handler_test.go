@@ -95,3 +95,27 @@ func TestHandleMemoryByKeyDeletesMemory(t *testing.T) {
 		t.Fatal("expected memory to be deleted")
 	}
 }
+
+func TestHandleMemoryByKeyGetDoesNotIncrementUsage(t *testing.T) {
+	handler := newTestHandler(t)
+	if err := handler.memory.Store("read-only", "inspect without scoring", []string{"dashboard"}); err != nil {
+		t.Fatalf("Store() failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/memories/read-only", nil)
+	res := httptest.NewRecorder()
+
+	handler.handleMemoryByKey(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", res.Code)
+	}
+
+	mem, err := handler.memory.Get("read-only")
+	if err != nil {
+		t.Fatalf("Get() failed: %v", err)
+	}
+	if mem.Usage != 0 {
+		t.Fatalf("expected usage to remain 0, got %d", mem.Usage)
+	}
+}
