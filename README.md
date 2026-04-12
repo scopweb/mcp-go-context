@@ -1,82 +1,109 @@
-# MCP Go Context Server 🚀
+# MCP Go Context Server
 
 [![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat-square&logo=go)](https://golang.org/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
-[![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen?style=flat-square)](#)
 
-> **Advanced Context Management for AI Coding Assistants**  
-> A high-performance MCP server that provides intelligent project analysis, persistent memory, and hybrid documentation fetching.
+MCP server written in Go for local project analysis, conversation memory, and documentation lookup.
 
-## ✨ Features
+The project is intended for editor and assistant workflows where it is useful to keep technical context close to the codebase instead of depending only on external services.
 
-- 🧠 **Persistent Conversation Memory** - Remembers context across sessions
-- 📊 **Deep Project Analysis** - AST parsing, dependency mapping, and metrics
-- 🌐 **Hybrid Documentation** - Context7 API + local analysis + fallbacks
-- ⚡ **High Performance** - Local caching and incremental analysis
-- 🔧 **Zero Dependencies** - Single binary, pure Go stdlib
-- 🚀 **Multi-Transport** - stdio, HTTP, and SSE support
-- ⚙️ **Highly Configurable** - JSON-based configuration system
+## What It Does
 
-## 🆚 Why Choose Over Context7?
+- analyzes the current project structure and dependencies
+- stores and retrieves persistent memory between sessions
+- fetches documentation with local fallbacks when possible
+- exposes MCP tools over `stdio`, `http`, or `sse`
+- serves a local memory dashboard when running over `http` or `sse`
 
-| Feature | Context7 | MCP Go Context | Advantage |
-|---------|----------|----------------|-----------|
-| **Offline Analysis** | ❌ | ✅ | Works without internet |
-| **Conversation Memory** | ❌ | ✅ | Persistent across sessions |
-| **Project Understanding** | ❌ | ✅ | Deep AST analysis |
-| **Performance** | API calls | ✅ | Local cache + analysis |
-| **Dependencies** | Node.js | ✅ | Single binary |
-| **Extensibility** | Limited | ✅ | Modular architecture |
+## Install
 
-## 🚀 Quick Start
-
-### Installation
+You can build the binary directly:
 
 ```bash
-# Download the latest release
-go install github.com/scopweb/mcp-go-context@latest
-
-# Or build from source
 git clone https://github.com/scopweb/mcp-go-context
 cd mcp-go-context
-go build -o mcp-context-server.exe
+go build -o bin/mcp-context-server ./cmd/mcp-context-server
 ```
 
-### Configuration for Claude Desktop
+Or use the Makefile:
 
-Add to your `claude_desktop_config.json`:
+```bash
+make build
+```
+
+## Basic Usage
+
+Run with the default `stdio` transport:
+
+```bash
+./bin/mcp-context-server --transport stdio
+```
+
+Run over HTTP:
+
+```bash
+./bin/mcp-context-server --transport http --port 3000
+```
+
+Show build version:
+
+```bash
+./bin/mcp-context-server --version
+```
+
+## Configuration
+
+The server reads `config.json` when provided with `--config`, or falls back to built-in defaults.
+
+Minimal example:
+
+```json
+{
+  "transport": {
+    "type": "stdio",
+    "port": 3000
+  },
+  "memory": {
+    "enabled": true,
+    "persistent": true,
+    "storagePath": "$HOME/.mcp-go-context/memory"
+  }
+}
+```
+
+## Editor Integration
+
+Claude Desktop example:
 
 ```json
 {
   "mcpServers": {
     "mcp-go-context": {
-      "command": "mcp-context-server.exe",
-      "args": []
+      "command": "/absolute/path/to/bin/mcp-context-server",
+      "args": ["--transport", "stdio"]
     }
   }
 }
 ```
 
-### Configuration for Cursor
-
-Add to your `.cursor/mcp.json`:
+Cursor example:
 
 ```json
 {
   "mcpServers": {
     "mcp-go-context": {
-      "command": "mcp-context-server.exe",
-      "args": []
+      "command": "/absolute/path/to/bin/mcp-context-server",
+      "args": ["--transport", "stdio"]
     }
   }
 }
 ```
 
-### Dashboard de memorias
+## Dashboard
 
-El dashboard web de memorias se expone solo cuando el servidor arranca con transporte `http` o `sse`. Si usas `stdio`, las herramientas MCP siguen funcionando, pero no se publica interfaz web.
+The memory dashboard is available only when the server runs with `http` or `sse` transport.
 
-Ejemplo mínimo en `config.json`:
+Example:
 
 ```json
 {
@@ -87,34 +114,50 @@ Ejemplo mínimo en `config.json`:
 }
 ```
 
-Con esa configuración, inicia el servidor y abre:
+With that configuration:
 
-- `http://localhost:3000/dashboard` para la interfaz web
-- `http://localhost:3000/api/memories` para la API JSON de consulta
+- `http://localhost:3000/dashboard` serves the web UI
+- `http://localhost:3000/api/memories` serves the JSON API
 
-El dashboard permite buscar memorias guardadas, filtrar por tipo de decisión, revisar uso/recencia y eliminar entradas. Todos los datos se sirven localmente desde el propio proceso Go.
+The dashboard is intended for local inspection and maintenance of stored memories: search, filtering, read-only inspection, and deletion.
 
-## 🛠️ Available Tools
+## MCP Tools
 
-### 📊 `analyze-project`
-Performs comprehensive project analysis with metrics and dependency mapping.
+`analyze-project`
+Analyzes the project structure, relevant files, and dependencies.
 
-### 🔍 `get-context`
-Retrieves intelligent context for your current task with memory integration.
+`get-context`
+Builds contextual output for a query using project analysis and stored memory.
 
-### 📚 `fetch-docs`
-Fetches documentation using Context7 API with intelligent fallbacks.
+`fetch-docs`
+Fetches documentation for a library or topic, with fallbacks when remote lookup is unavailable.
 
-### 💭 `remember-conversation`
-Stores important context for future reference with intelligent tagging.
+`remember-conversation`
+Stores conversation context with tags for later retrieval.
 
-### 🔗 `dependency-analysis`
-Analyzes project dependencies with security recommendations.
+`dependency-analysis`
+Extracts dependency information and related recommendations.
 
-## 📄 License
+## Development
 
-MIT License - see [LICENSE](LICENSE) file for details.
+Run tests:
 
----
+```bash
+go test ./...
+```
 
-**Made with ❤️ by [ScopWeb](https://scopweb.com)**
+Run the HTTP transport locally:
+
+```bash
+make run-http
+```
+
+Run the SSE transport locally:
+
+```bash
+make run-sse
+```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
