@@ -237,6 +237,10 @@ func (a *ProjectAnalyzer) GetRelevantContext(query string, files []string, maxTo
 		}
 	} else {
 		// Find relevant files based on query
+		// FASE 1 FIX: If cache is empty, do quick discovery before searching
+		if len(a.cache) == 0 {
+			a.quickDiscovery()
+		}
 		relevantFiles := a.findRelevantFiles(query)
 		for _, file := range relevantFiles {
 			content, err := a.getFileContext(file.Path, maxTokens-tokenCount)
@@ -255,48 +259,136 @@ func (a *ProjectAnalyzer) GetRelevantContext(query string, files []string, maxTo
 	return context.String(), nil
 }
 
+// quickDiscovery does minimal project index when cache is empty (cold start fix)
+func (a *ProjectAnalyzer) quickDiscovery() {
+	// Iterate over all configured project paths
+	for _, projectPath := range a.config.ProjectPaths {
+		absPath, err := filepath.Abs(projectPath)
+		if err != nil {
+			continue
+		}
+
+		// Walk the project directory
+		filepath.WalkDir(absPath, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+
+			if d.IsDir() {
+				// Skip ignored directories
+				if a.shouldIgnore(path) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+
+			// Skip ignored files
+			if a.shouldIgnore(path) {
+				return nil
+			}
+
+			// Analyze the file and cache it
+			info, err := a.analyzeFile(path)
+			if err == nil {
+				a.cache[path] = info
+			}
+
+			return nil
+		})
+	}
+}
+
 // AnalyzeDependencies analyzes project dependencies
 func (a *ProjectAnalyzer) AnalyzeDependencies(includeTransitive bool) ([]Dependency, error) {
 	var deps []Dependency
 
-	// Check for go.mod
-	goModPath := filepath.Join(a.config.ProjectPaths[0], "go.mod")
-	if _, err := os.Stat(goModPath); err == nil {
-		goDeps, err := a.parseGoMod(goModPath, includeTransitive)
+	// FASE 3 FIX: Iterate over all ProjectPaths for multi-ecosystem/monorepo support
+	for _, projectPath := range a.config.ProjectPaths {
+		absPath, err := filepath.Abs(projectPath)
 		if err != nil {
-			return nil, err
+			continue
 		}
-		deps = append(deps, goDeps...)
-	}
 
-	// Check for package.json (Node.js)
-	pkgPath := filepath.Join(a.config.ProjectPaths[0], "package.json")
-	if _, err := os.Stat(pkgPath); err == nil {
-		pkgDeps, err := a.parsePackageJSON(pkgPath, includeTransitive)
-		if err == nil {
-			deps = append(deps, pkgDeps...)
+		// Check for go.mod
+		goModPath := filepath.Join(absPath, "go.mod")
+		if _, err := os.Stat(goModPath); err == nil {
+			goDeps, err := a.parseGoMod(goModPath, includeTransitive)
+			if err == nil {
+				deps = append(deps, goDeps...)
+			}
 		}
-	}
 
-	// Check for pyproject.toml (Python)
-	pyprojectPath := filepath.Join(a.config.ProjectPaths[0], "pyproject.toml")
-	if _, err := os.Stat(pyprojectPath); err == nil {
-		pyDeps, err := a.parsePyproject(pyprojectPath, includeTransitive)
-		if err == nil {
-			deps = append(deps, pyDeps...)
+		// Check for package.json (Node.js)
+		pkgPath := filepath.Join(absPath, "package.json")
+		if _, err := os.Stat(pkgPath); err == nil {
+			pkgDeps, err := a.parsePackageJSON(pkgPath, includeTransitive)
+			if err == nil {
+				deps = append(deps, pkgDeps...)
+			}
 		}
-	}
 
-	// Check for requirements.txt (Python)
-	requirementsPath := filepath.Join(a.config.ProjectPaths[0], "requirements.txt")
-	if _, err := os.Stat(requirementsPath); err == nil {
-		reqDeps, err := a.parseRequirements(requirementsPath, includeTransitive)
-		if err == nil {
-			deps = append(deps, reqDeps...)
+		// Check for pyproject.toml (Python)
+		pyprojectPath := filepath.Join(absPath, "pyproject.toml")
+		if _, err := os.Stat(pyprojectPath); err == nil {
+			pyDeps, err := a.parsePyproject(pyprojectPath, includeTransitive)
+			if err == nil {
+				deps = append(deps, pyDeps...)
+			}
+		}
+
+		// Check for requirements.txt (Python)
+		requirementsPath := filepath.Join(absPath, "requirements.txt")
+		if _, err := os.Stat(requirementsPath); err == nil {
+			reqDeps, err := a.parseRequirements(requirementsPath, includeTransitive)
+			if err == nil {
+				deps = append(deps, reqDeps...)
+			}
+		}
+
+		// Check for pnpm-workspace.yaml (pnpm monorepo)
+		pnpmWorkspacePath := filepath.Join(absPath, "pnpm-workspace.yaml")
+		if _, err := os.Stat(pnpmWorkspacePath); err == nil {
+			// Find all packages in the monorepo
+			monorepoDeps := a.findMonorepoPackages(absPath, includeTransitive)
+			deps = append(deps, monorepoDeps...)
 		}
 	}
 
 	return deps, nil
+}
+
+// findMonorepoPackages finds packages in a pnpm monorepo
+func (a *ProjectAnalyzer) findMonorepoPackages(rootPath string, includeTransitive bool) []Dependency {
+	var deps []Dependency
+	packagesDir := filepath.Join(rootPath, "packages")
+
+	info, err := os.Stat(packagesDir)
+	if err != nil || !info.IsDir() {
+		return deps
+	}
+
+	entries, err := os.ReadDir(packagesDir)
+	if err != nil {
+		return deps
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pkgPath := filepath.Join(packagesDir, entry.Name(), "package.json")
+		if _, err := os.Stat(pkgPath); err == nil {
+			pkgDeps, err := a.parsePackageJSON(pkgPath, includeTransitive)
+			if err == nil {
+				for i := range pkgDeps {
+					pkgDeps[i].Path = pkgPath // Mark with full path
+				}
+				deps = append(deps, pkgDeps...)
+			}
+		}
+	}
+
+	return deps
 }
 
 // parseGoMod parses go.mod file for dependencies

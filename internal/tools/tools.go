@@ -422,33 +422,15 @@ func analyzeQuery(query string) string {
 }
 
 func fetchFromContext7(library, version, topic string, tokens int) (string, error) {
-	// Context7 API integration
-	baseURL := "https://context7.com/api/v1"
-	var url string
-
-	if library != "" {
-		url = fmt.Sprintf("%s/%s", baseURL, library)
-		if version != "" {
-			url = fmt.Sprintf("%s/%s", url, version)
-		}
-	} else {
-		return "", fmt.Errorf("library name required")
-	}
-
-	// Add query parameters
-	req, err := http.NewRequest("GET", url, nil)
+	// FASE 2 FIX: Context7 uses libraryId-based flow, not direct library names
+	// Step 1: Resolve libraryId from library name + query
+	resolveURL := "https://context7.com/api/v1/library/resolve"
+	resolveBody := fmt.Sprintf(`{"library": "%s", "query": "%s"}`, library, topic)
+	req, err := http.NewRequest("POST", resolveURL, strings.NewReader(resolveBody))
 	if err != nil {
 		return "", err
 	}
-
-	q := req.URL.Query()
-	if topic != "" {
-		q.Add("topic", topic)
-	}
-	q.Add("tokens", fmt.Sprintf("%d", tokens))
-	q.Add("type", "txt")
-	req.URL.RawQuery = q.Encode()
-
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Context7-Source", "mcp-server-go")
 
 	client := &http.Client{Timeout: 30 * time.Second}
@@ -459,7 +441,7 @@ func fetchFromContext7(library, version, topic string, tokens int) (string, erro
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API returned status %d", resp.StatusCode)
+		return "", fmt.Errorf("library resolve returned status %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -467,12 +449,56 @@ func fetchFromContext7(library, version, topic string, tokens int) (string, erro
 		return "", err
 	}
 
-	content := string(body)
+	// Parse libraryId from response
+	var resolveResp struct {
+		LibraryID string `json:"libraryId"`
+	}
+	if err := json.Unmarshal(body, &resolveResp); err != nil {
+		return "", fmt.Errorf("failed to parse library response: %w", err)
+	}
+
+	if resolveResp.LibraryID == "" {
+		return "", fmt.Errorf("no libraryId resolved for %s", library)
+	}
+
+	// Step 2: Fetch docs using libraryId
+	docsURL := fmt.Sprintf("https://context7.com/api/v1/library/%s/docs", resolveResp.LibraryID)
+	docsReq, err := http.NewRequest("GET", docsURL, nil)
+	if err != nil {
+		return "", err
+	}
+
+	q := docsReq.URL.Query()
+	if version != "" {
+		q.Add("version", version)
+	}
+	q.Add("tokens", fmt.Sprintf("%d", tokens))
+	q.Add("type", "txt")
+	docsReq.URL.RawQuery = q.Encode()
+
+	docsReq.Header.Set("X-Context7-Source", "mcp-server-go")
+
+	docsResp, err := client.Do(docsReq)
+	if err != nil {
+		return "", err
+	}
+	defer docsResp.Body.Close()
+
+	if docsResp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("docs fetch returned status %d", docsResp.StatusCode)
+	}
+
+	docsBody, err := io.ReadAll(docsResp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	content := string(docsBody)
 	if content == "No content available" || content == "No context data available" {
 		return "", fmt.Errorf("no documentation available")
 	}
 
-	return content, nil
+	return "[Context7]\n" + content, nil
 }
 
 func searchLocalDocs(library, topic string) string {

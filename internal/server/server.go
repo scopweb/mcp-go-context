@@ -116,7 +116,14 @@ func (s *Server) handleRequest(ctx context.Context, req json.RawMessage) (json.R
 
 	switch baseReq.Method {
 	case "initialize":
-		result, err = s.handleInitialize(baseReq.ID)
+		// Extract protocol version from params for negotiation
+		protoVersion := "2025-11-25" // default
+		if paramsMap, ok := baseReq.Params.(map[string]interface{}); ok {
+			if v, ok := paramsMap["protocolVersion"].(string); ok {
+				protoVersion = v
+			}
+		}
+		result, err = s.handleInitialize(baseReq.ID, protoVersion)
 	case "tools/list":
 		result, err = s.handleToolsList()
 	case "tools/call":
@@ -159,18 +166,35 @@ func (s *Server) createErrorResponse(id interface{}, code int, message string) (
 }
 
 // handleInitialize handles the initialize request
-func (s *Server) handleInitialize(id interface{}) (interface{}, error) {
+func (s *Server) handleInitialize(id interface{}, protocolVersion string) (interface{}, error) {
+	// Echo the client's protocol version for compatibility (per MCP spec)
+	// Claude Desktop and Claude Code send 2025-11-25
+	if protocolVersion == "" {
+		protocolVersion = "2025-11-25"
+	}
+
 	return map[string]interface{}{
-		"protocolVersion": "2024-11-05",
+		"protocolVersion": protocolVersion,
 		"capabilities": map[string]interface{}{
 			"tools": map[string]bool{
-				"listChanged": false,
+				"listChanged": true,
 			},
 		},
 		"serverInfo": map[string]string{
 			"name":    "MCP Context Server",
 			"version": buildinfo.Version,
 		},
+		"instructions": `This server provides intelligent context management for coding assistance.
+Available tools:
+- analyze-project: Analyzes project structure, dependencies, and provides comprehensive context
+- get-context: Retrieves relevant context for the current task based on files, dependencies, and conversation history
+- fetch-docs: Fetches documentation for libraries and dependencies
+- remember-conversation: Stores important context from the current conversation for future reference
+- dependency-analysis: Analyzes project dependencies and suggests relevant documentation
+- changed-files-context: Gets context from files changed in recent git commits
+- search-memory: Advanced search through conversation memory with ranking by relevance, recency, and usage
+- save-decision: Records a technical decision with structured metadata for future reference
+- get-decisions: Retrieves technical decisions, optionally filtered by type or keyword`,
 	}, nil
 }
 

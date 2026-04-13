@@ -64,57 +64,37 @@ func (t *StdioTransport) Start(ctx context.Context, info ServerInfo, handler Req
 }
 
 // readMessage reads a JSON-RPC message from stdin
+// MCP stdio uses newline-delimited JSON messages (one JSON object per line)
 func (t *StdioTransport) readMessage() (json.RawMessage, error) {
-	// Read headers
-	headers := make(map[string]string)
-	for {
-		line, err := t.reader.ReadString('\n')
-		if err != nil {
+	// Read a line (message) from stdin
+	line, err := t.reader.ReadString('\n')
+	if err != nil {
+		if err == io.EOF {
 			return nil, err
 		}
-
-		line = strings.TrimSpace(line)
-		if line == "" {
-			break
-		}
-
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) == 2 {
-			headers[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
-		}
+		return nil, fmt.Errorf("failed to read message: %w", err)
 	}
 
-	// Get content length
-	contentLengthStr, ok := headers["Content-Length"]
-	if !ok {
-		return nil, fmt.Errorf("missing Content-Length header")
+	// Trim Windows CRLF and trailing newline
+	line = strings.TrimSuffix(strings.TrimSuffix(line, "\r"), "\n")
+	line = strings.TrimSpace(line)
+
+	// Skip empty lines (common at startup)
+	if line == "" {
+		return nil, fmt.Errorf("empty line received")
 	}
 
-	var contentLength int
-	if _, err := fmt.Sscanf(contentLengthStr, "%d", &contentLength); err != nil {
-		return nil, fmt.Errorf("invalid Content-Length: %w", err)
-	}
-
-	if contentLength <= 0 {
-		return nil, fmt.Errorf("invalid content length: %d", contentLength)
-	}
-
-	// Read content
-	content := make([]byte, contentLength)
-	if _, err := io.ReadFull(t.reader, content); err != nil {
-		return nil, fmt.Errorf("failed to read content: %w", err)
-	}
-
-	// Validate JSON
+	// Validate it's valid JSON
 	var temp interface{}
-	if err := json.Unmarshal(content, &temp); err != nil {
-		return nil, fmt.Errorf("invalid JSON content: %w", err)
+	if err := json.Unmarshal([]byte(line), &temp); err != nil {
+		return nil, fmt.Errorf("invalid JSON message: %w", err)
 	}
 
-	return json.RawMessage(content), nil
+	return json.RawMessage(line), nil
 }
 
-// sendMessage sends a JSON-RPC message to stdout with proper formatting
+// sendMessage sends a JSON-RPC message to stdout
+// MCP stdio: messages are newline-delimited JSON, no headers
 func (t *StdioTransport) sendMessage(msg json.RawMessage) error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
@@ -125,13 +105,11 @@ func (t *StdioTransport) sendMessage(msg json.RawMessage) error {
 		return fmt.Errorf("invalid JSON message: %w", err)
 	}
 
-	// Write headers
-	fmt.Fprintf(t.writer, "Content-Length: %d\r\n", len(msg))
-	fmt.Fprintf(t.writer, "Content-Type: application/vnd.jsonrpc+json; charset=utf-8\r\n")
-	fmt.Fprintf(t.writer, "\r\n")
-
-	// Write content
+	// Write JSON followed by newline (per MCP stdio spec)
 	if _, err := t.writer.Write(msg); err != nil {
+		return err
+	}
+	if _, err := t.writer.Write([]byte("\n")); err != nil {
 		return err
 	}
 
