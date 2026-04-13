@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.1.1] - 2026-04-13
+
+### Fixed
+- Protocol version negotiation: server now echoes client's version instead of hardcoded `2024-11-05`, ensuring compatibility with Claude Desktop and Claude Code (which use `2025-11-25`).
+- Stdio transport: switched from HTTP-style header parsing (`Content-Length`) to proper MCP newline-delimited JSON per spec.
+- `listChanged` capability corrected from `false` to `true`.
+
+### Changed
+- `InitializeResult` now includes `instructions` field with full tool catalog, enabling better tool discovery by AI models.
+
+### Added
+- Claude Desktop compatible configuration example in README.
+
 ## [1.1.0] - 2026-04-12
 
 ### Added
