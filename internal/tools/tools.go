@@ -28,6 +28,9 @@ type AnalyzerInterface interface {
 	GetRelevantContext(string, []string, int) (string, error)
 	AnalyzeDependencies(bool) ([]analyzer.Dependency, error)
 	GetRecentlyChangedFiles(string, int) ([]analyzer.ChangedFile, error)
+	EnsureLightIndex(int, time.Duration) // Fase 0: bounded cold-start indexing
+	IsLightIndexed() bool
+	LightIndexStats() map[string]interface{}
 }
 
 type MemoryInterface interface {
@@ -35,8 +38,14 @@ type MemoryInterface interface {
 	StoreWithType(string, string, []string, string, string, []string) error
 	Retrieve(string) (*memory.Memory, error)
 	Search(string, []string) ([]*memory.Memory, error)
+	SearchWithProject(string, []string, string) ([]*memory.Memory, error)
+	ActiveProject() string
 	SearchDecisions(string, string, int) ([]*memory.Memory, error)
 	GetDecisionTypes() ([]string, error)
+	GetPromotedMemories(int) ([]*memory.Memory, error)
+	Promote(string, string) error
+	Demote(string) error
+	SuggestForPromotion(int) ([]*memory.Memory, error) // Fase 1: intelligent promotion suggestions
 }
 
 type ConfigInterface interface {
@@ -776,9 +785,10 @@ func toolDetectLanguage(path string) string {
 // SearchMemoryHandler - Advanced memory search with ranking
 func SearchMemoryHandler(args json.RawMessage, server interface{}) (interface{}, error) {
 	var params struct {
-		Query string   `json:"query"`
-		Tags  []string `json:"tags"`
-		Limit int      `json:"limit"`
+		Query   string   `json:"query"`
+		Tags    []string `json:"tags"`
+		Project string   `json:"project"`
+		Limit   int      `json:"limit"`
 	}
 
 	if err := json.Unmarshal(args, &params); err != nil {
@@ -799,7 +809,7 @@ func SearchMemoryHandler(args json.RawMessage, server interface{}) (interface{},
 		return createErrorResponse("Memory manager not available")
 	}
 
-	results, err := memory.Search(params.Query, params.Tags)
+	results, err := memory.SearchWithProject(params.Query, params.Tags, params.Project)
 	if err != nil {
 		return createErrorResponse(fmt.Sprintf("Search failed: %v", err))
 	}
@@ -920,6 +930,173 @@ func GetDecisionsHandler(args json.RawMessage, server interface{}) (interface{},
 	}
 
 	return textResponse(result.String()), nil
+}
+
+// PromoteMemoryHandler - Marks a memory as promoted (high-value, from session convergence)
+func PromoteMemoryHandler(args json.RawMessage, server interface{}) (interface{}, error) {
+	var params struct {
+		Key       string `json:"key"`       // memory key to promote
+		Confidence string `json:"confidence"` // "low", "medium", "high"
+	}
+
+	if err := json.Unmarshal(args, &params); err != nil {
+		return nil, fmt.Errorf("invalid parameters: %w", err)
+	}
+
+	if params.Key == "" {
+		return createErrorResponse("key is required")
+	}
+
+	// Default confidence if not provided
+	if params.Confidence == "" {
+		params.Confidence = "high"
+	}
+
+	srv, ok := server.(ServerInterface)
+	if !ok {
+		return createErrorResponse("Server interface error")
+	}
+
+	mem := srv.GetMemory()
+	if mem == nil {
+		return createErrorResponse("Memory manager not available")
+	}
+
+	// Verify memory exists
+	existing, err := mem.Retrieve(params.Key)
+	if err != nil {
+		return createErrorResponse(fmt.Sprintf("Memory not found: %s", params.Key))
+	}
+
+	// Promote it
+	if err := mem.Promote(params.Key, params.Confidence); err != nil {
+		return createErrorResponse(fmt.Sprintf("Failed to promote memory: %v", err))
+	}
+
+	return textResponse(fmt.Sprintf(
+		"Memory '%s' promoted to persistent storage.\n- Confidence: %s\n- Tags: %v\n- Content preview: %s...",
+		params.Key,
+		params.Confidence,
+		existing.Tags,
+		truncate(existing.Content, 100),
+	)), nil
+}
+
+// GetPromotedMemoriesHandler - Returns memories that have been promoted from session
+func GetPromotedMemoriesHandler(args json.RawMessage, server interface{}) (interface{}, error) {
+	var params struct {
+		Limit int `json:"limit"` // max results (default 10)
+	}
+
+	if err := json.Unmarshal(args, &params); err != nil {
+		return nil, fmt.Errorf("invalid parameters: %w", err)
+	}
+
+	if params.Limit == 0 {
+		params.Limit = 10
+	}
+
+	srv, ok := server.(ServerInterface)
+	if !ok {
+		return createErrorResponse("Server interface error")
+	}
+
+	mem := srv.GetMemory()
+	if mem == nil {
+		return createErrorResponse("Memory manager not available")
+	}
+
+	promoted, err := mem.GetPromotedMemories(params.Limit)
+	if err != nil {
+		return createErrorResponse(fmt.Sprintf("Failed to get promoted memories: %v", err))
+	}
+
+	if len(promoted) == 0 {
+		return textResponse("No promoted memories found.\n\nUse promote-memory to mark high-value memories for persistence."), nil
+	}
+
+	var result strings.Builder
+	result.WriteString("# Promoted Memories (High-Value)\n\n")
+	result.WriteString(fmt.Sprintf("Found %d promoted memories:\n\n", len(promoted)))
+
+	for _, m := range promoted {
+		result.WriteString(fmt.Sprintf("## %s\n", m.Key))
+		result.WriteString(fmt.Sprintf("**Confidence**: %s | **Type**: %s\n", m.Confidence, m.DecisionType))
+		result.WriteString(fmt.Sprintf("**Tags**: %v\n", m.Tags))
+		result.WriteString(fmt.Sprintf("**Promoted**: %s\n\n", m.Timestamp.Format("2006-01-02 15:04")))
+		result.WriteString(m.Content + "\n\n")
+		if m.Reason != "" {
+			result.WriteString(fmt.Sprintf("**Reason**: %s\n\n", m.Reason))
+		}
+		result.WriteString("---\n\n")
+	}
+
+	return textResponse(result.String()), nil
+}
+
+// SuggestPromotionsHandler - Suggests high-value memories worth promoting (Fase 1)
+func SuggestPromotionsHandler(args json.RawMessage, server interface{}) (interface{}, error) {
+	var params struct {
+		Limit int `json:"limit"`
+	}
+
+	if err := json.Unmarshal(args, &params); err != nil {
+		return nil, fmt.Errorf("invalid parameters: %w", err)
+	}
+	if params.Limit == 0 {
+		params.Limit = 5
+	}
+
+	srv, ok := server.(ServerInterface)
+	if !ok {
+		return createErrorResponse("Server interface error")
+	}
+
+	mem := srv.GetMemory()
+	if mem == nil {
+		return createErrorResponse("Memory manager not available")
+	}
+
+	suggestions, err := mem.SuggestForPromotion(params.Limit)
+	if err != nil {
+		return createErrorResponse(fmt.Sprintf("Failed to generate suggestions: %v", err))
+	}
+
+	if len(suggestions) == 0 {
+		return textResponse("No strong promotion candidates found at the moment.\n\nConsider using save-decision for important technical choices so they can be suggested later."), nil
+	}
+
+	var result strings.Builder
+	result.WriteString("# Suggested Memories for Promotion\n\n")
+	result.WriteString(fmt.Sprintf("Found %d high-value candidates (use `promote-memory` with the key):\n\n", len(suggestions)))
+
+	for i, m := range suggestions {
+		result.WriteString(fmt.Sprintf("## %d. %s\n", i+1, m.Key))
+		result.WriteString(fmt.Sprintf("**Type**: %s | **Usage**: %d | **Age**: %s\n",
+			m.DecisionType, m.Usage, m.Timestamp.Format("2006-01-02")))
+		if m.Confidence != "" {
+			result.WriteString(fmt.Sprintf("**Confidence**: %s\n", m.Confidence))
+		}
+		result.WriteString(fmt.Sprintf("**Tags**: %v\n\n", m.Tags))
+		result.WriteString(m.Content + "\n\n")
+		if m.Reason != "" {
+			result.WriteString(fmt.Sprintf("**Reason**: %s\n\n", m.Reason))
+		}
+		result.WriteString(fmt.Sprintf("**Suggested action**:\n`promote-memory` with key = \"%s\"\n\n", m.Key))
+		result.WriteString("---\n\n")
+	}
+
+	result.WriteString("\nAfter promoting, these memories will be returned by `get-promoted-memories` and will have higher priority in future context retrieval.\n")
+
+	return textResponse(result.String()), nil
+}
+
+// truncate truncates a string to maxLen characters
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // formatSearchResults formats memory search results for display

@@ -11,11 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scopweb/mcp-go-context/internal/analyzer"
 	"github.com/scopweb/mcp-go-context/internal/memory"
 )
 
 type Handler struct {
-	memory *memory.Manager
+	memory   *memory.Manager
+	analyzer *analyzer.ProjectAnalyzer
 }
 
 type memoryDTO struct {
@@ -24,9 +26,11 @@ type memoryDTO struct {
 	Tags         []string  `json:"tags"`
 	Timestamp    time.Time `json:"timestamp"`
 	Usage        int       `json:"usage"`
+	Project      string    `json:"project,omitempty"`
 	DecisionType string    `json:"decisionType,omitempty"`
 	Reason       string    `json:"reason,omitempty"`
 	Alternatives []string  `json:"alternatives,omitempty"`
+	Promoted     bool      `json:"promoted,omitempty"` // Fase 3
 }
 
 type memoryStats struct {
@@ -34,25 +38,70 @@ type memoryStats struct {
 	DecisionCount int      `json:"decisionCount"`
 	TagCount      int      `json:"tagCount"`
 	DecisionTypes []string `json:"decisionTypes"`
+	PromotedCount int      `json:"promotedCount"` // Fase 3
 }
 
 type memoryListResponse struct {
-	Items []memoryDTO `json:"items"`
-	Stats memoryStats `json:"stats"`
+	Items         []memoryDTO          `json:"items"`
+	Stats         memoryStats          `json:"stats"`
+	Projects      []memory.ProjectStat `json:"projects"`
+	ActiveProject string               `json:"activeProject"`
 }
 
-func New(memoryManager *memory.Manager) (*Handler, error) {
+func New(memoryManager *memory.Manager, analyzer *analyzer.ProjectAnalyzer) (*Handler, error) {
 	if memoryManager == nil {
 		return nil, fmt.Errorf("memory manager is required")
 	}
 
-	return &Handler{memory: memoryManager}, nil
+	return &Handler{memory: memoryManager, analyzer: analyzer}, nil
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/dashboard", h.handleDashboard)
 	mux.HandleFunc("/api/memories", h.handleMemories)
 	mux.HandleFunc("/api/memories/", h.handleMemoryByKey)
+	mux.HandleFunc("/api/projects", h.handleProjects)
+	mux.HandleFunc("/api/project-summary", h.handleProjectSummary)
+	mux.HandleFunc("/api/quick-context", h.handleQuickContext)
+	mux.HandleFunc("/api/suggestions", h.handleSuggestions)
+}
+
+// handleProjects returns the list of known projects with memory counts.
+func (h *Handler) handleProjects(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"active":   h.memory.ActiveProject(),
+		"projects": h.memory.ListProjects(),
+	})
+}
+
+// handleSuggestions returns promotion candidates (Fase 3)
+func (h *Handler) handleSuggestions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	limit := 6
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	suggestions, err := h.memory.SuggestForPromotion(limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"items": toMemoryDTOs(suggestions),
+		"count": len(suggestions),
+	})
 }
 
 var pageTemplate = template.Must(template.New("memory-dashboard").Parse(`<!DOCTYPE html>
@@ -305,6 +354,10 @@ var pageTemplate = template.Must(template.New("memory-dashboard").Parse(`<!DOCTY
             <span class="stat-label">Unique tags</span>
             <span class="stat-value" id="stat-tags">0</span>
           </div>
+          <div class="stat">
+            <span class="stat-label">Promoted</span>
+            <span class="stat-value" id="stat-promoted">0</span>
+          </div>
         </div>
       </div>
       <div class="panel">
@@ -319,6 +372,13 @@ var pageTemplate = template.Must(template.New("memory-dashboard").Parse(`<!DOCTY
         <label>
           Search
           <input id="search" type="search" placeholder="Search by key, content, reason or alternatives">
+        </label>
+        <label>
+          Project
+          <select id="project">
+            <option value="">Active project</option>
+            <option value="*">All projects</option>
+          </select>
         </label>
         <label>
           Decision type
@@ -339,29 +399,47 @@ var pageTemplate = template.Must(template.New("memory-dashboard").Parse(`<!DOCTY
           Actions
           <button id="refresh" type="button">Refresh</button>
         </label>
+        <label style="align-items:center; gap:6px;">
+          <input type="checkbox" id="promoted-only"> 
+          <span style="font-size:0.85rem;">Promoted only</span>
+        </label>
       </div>
+      <div id="active-project-banner" class="footer-note" style="margin-top:8px"></div>
+
+      <!-- Fase 3: Suggestions for promotion -->
+      <h3 style="margin-top: 28px; margin-bottom: 4px; color: var(--text);">Suggested for Promotion</h3>
+      <p style="margin:0 0 12px 0; font-size:0.8rem; color:var(--muted);">These are the highest-value memories worth keeping across sessions. Promote the ones that matter.</p>
+      <div id="suggestions" class="memory-grid" style="margin-bottom: 24px;"></div>
+
       <div id="memories" class="memory-grid"></div>
     </section>
   </div>
 
   <script>
     const searchInput = document.getElementById('search');
+    const projectSelect = document.getElementById('project');
     const decisionTypeSelect = document.getElementById('decision-type');
     const limitSelect = document.getElementById('limit');
     const refreshButton = document.getElementById('refresh');
     const memoriesContainer = document.getElementById('memories');
+    const suggestionsContainer = document.getElementById('suggestions');
     const decisionTypesContainer = document.getElementById('decision-types');
+    const activeProjectBanner = document.getElementById('active-project-banner');
 
     const statTotal = document.getElementById('stat-total');
     const statDecisions = document.getElementById('stat-decisions');
     const statTags = document.getElementById('stat-tags');
+    const statPromoted = document.getElementById('stat-promoted');
+    const promotedOnlyCheckbox = document.getElementById('promoted-only');
 
     let refreshTimer;
+    let lastMemories = []; // for client-side promoted filter
 
     async function loadMemories() {
       const params = new URLSearchParams();
       if (searchInput.value.trim()) params.set('query', searchInput.value.trim());
       if (decisionTypeSelect.value) params.set('decisionType', decisionTypeSelect.value);
+      if (projectSelect.value !== '') params.set('project', projectSelect.value);
       params.set('limit', limitSelect.value);
 
       const response = await fetch('/api/memories?' + params.toString());
@@ -373,13 +451,34 @@ var pageTemplate = template.Must(template.New("memory-dashboard").Parse(`<!DOCTY
       const data = await response.json();
       renderStats(data.stats || {});
       renderDecisionTypes(data.stats?.decisionTypes || []);
+      renderProjects(data.projects || [], data.activeProject || '');
       renderMemories(data.items || []);
+    }
+
+    function renderProjects(projects, active) {
+      const prev = projectSelect.value;
+      const opts = ['<option value="">Active project (' + (active || '—') + ')</option>',
+                    '<option value="*">All projects</option>'];
+      projects.forEach(p => {
+        const label = p.project + ' (' + p.count + ')' + (p.active ? ' • active' : '');
+        opts.push('<option value="' + p.project + '">' + label + '</option>');
+      });
+      projectSelect.innerHTML = opts.join('');
+      // Restore previous selection if still valid.
+      const valid = Array.from(projectSelect.options).some(o => o.value === prev);
+      projectSelect.value = valid ? prev : '';
+      if (activeProjectBanner) {
+        activeProjectBanner.textContent = 'Active project: ' + (active || '—');
+      }
     }
 
     function renderStats(stats) {
       statTotal.textContent = stats.total || 0;
       statDecisions.textContent = stats.decisionCount || 0;
       statTags.textContent = stats.tagCount || 0;
+      if (statPromoted) {
+        statPromoted.textContent = stats.promotedCount || 0;
+      }
 
       const selected = decisionTypeSelect.value;
       decisionTypeSelect.innerHTML = '<option value="">All</option>';
@@ -407,12 +506,23 @@ var pageTemplate = template.Must(template.New("memory-dashboard").Parse(`<!DOCTY
     }
 
     function renderMemories(items) {
-      if (!items.length) {
+      lastMemories = items;
+
+      let toRender = items;
+      if (promotedOnlyCheckbox && promotedOnlyCheckbox.checked) {
+        toRender = items.filter(i => i.promoted);
+        if (!toRender.length) {
+          memoriesContainer.innerHTML = '<div class="empty">No promoted memories match current filters.</div>';
+          return;
+        }
+      }
+
+      if (!toRender.length) {
         memoriesContainer.innerHTML = '<div class="empty">No memories matched the current filters.</div>';
         return;
       }
 
-      memoriesContainer.innerHTML = items.map(item => {
+      memoriesContainer.innerHTML = toRender.map(item => {
         const timestamp = item.timestamp ? new Date(item.timestamp).toLocaleString() : 'n/a';
         const tags = (item.tags || []).map(tag => '<span class="tag">' + escapeHtml(tag) + '</span>').join('');
         const alternatives = (item.alternatives || []).length
@@ -420,16 +530,18 @@ var pageTemplate = template.Must(template.New("memory-dashboard").Parse(`<!DOCTY
           : '';
         const reason = item.reason ? '<div><strong>Reason:</strong> ' + escapeHtml(item.reason) + '</div>' : '';
         const badge = item.decisionType ? '<span class="badge">' + escapeHtml(item.decisionType) + '</span>' : '';
+        const promotedBadge = item.promoted ? '<span class="badge" style="background:#d4edda;color:#155724;">Promoted</span>' : '';
 
         return '' +
           '<article class="memory-card">' +
             '<div class="memory-head">' +
               '<h2 class="memory-key">' + escapeHtml(item.key) + '</h2>' +
-              badge +
+              badge + promotedBadge +
             '</div>' +
             '<div class="memory-meta">' +
               '<span>Saved ' + escapeHtml(timestamp) + '</span>' +
               '<span>Usage ' + (item.usage || 0) + '</span>' +
+              '<span>Project ' + escapeHtml(item.project || 'unassigned') + '</span>' +
             '</div>' +
             '<p class="memory-content">' + escapeHtml(item.content || '') + '</p>' +
             reason +
@@ -475,9 +587,96 @@ var pageTemplate = template.Must(template.New("memory-dashboard").Parse(`<!DOCTY
     searchInput.addEventListener('input', scheduleRefresh);
     decisionTypeSelect.addEventListener('change', loadMemories);
     limitSelect.addEventListener('change', loadMemories);
+    projectSelect.addEventListener('change', loadMemories);
     refreshButton.addEventListener('click', loadMemories);
 
+    if (promotedOnlyCheckbox) {
+      promotedOnlyCheckbox.addEventListener('change', () => {
+        if (lastMemories.length) {
+          renderMemories(lastMemories);
+        }
+      });
+    }
+
     loadMemories();
+    loadSuggestions();
+
+    async function loadSuggestions() {
+      if (!suggestionsContainer) return;
+      try {
+        const res = await fetch('/api/suggestions?limit=6');
+        if (!res.ok) throw new Error('Failed');
+        const data = await res.json();
+        renderSuggestions(data.items || []);
+      } catch (e) {
+        suggestionsContainer.innerHTML = '<div class="empty">Could not load suggestions.</div>';
+      }
+    }
+
+    function renderSuggestions(items) {
+      if (!suggestionsContainer) return;
+
+      // Header with refresh button
+      const header = `
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+          <span style="font-weight:600; color:var(--text);">Top candidates for long-term memory</span>
+          <button id="refresh-suggestions" style="font-size:0.75rem; padding:4px 10px; background:transparent; color:var(--accent); border:1px solid var(--accent);">↻ Refresh</button>
+        </div>
+      `;
+
+      if (!items.length) {
+        suggestionsContainer.innerHTML = header + '<div class="empty">No strong promotion candidates right now. Great job keeping memory clean!</div>';
+        document.getElementById('refresh-suggestions')?.addEventListener('click', loadSuggestions);
+        return;
+      }
+
+      suggestionsContainer.innerHTML = header + items.map(item => {
+        const badge = item.decisionType ? '<span class="badge">' + escapeHtml(item.decisionType) + '</span>' : '';
+        const usage = item.usage ? `<span style="font-size:0.75rem;color:var(--muted);">Used ${item.usage}×</span>` : '';
+        const reasonPreview = item.reason ? `<div style="font-size:0.8rem; color:#555; margin-top:4px;"><strong>Reason:</strong> ${escapeHtml(item.reason.slice(0,120))}${item.reason.length > 120 ? '...' : ''}</div>` : '';
+
+        return '' +
+          '<article class="memory-card" style="border-left: 4px solid var(--accent);">' +
+            '<div class="memory-head">' +
+              '<h2 class="memory-key" style="font-size:1rem;">' + escapeHtml(item.key) + '</h2>' +
+              badge +
+            '</div>' +
+            '<p class="memory-content" style="font-size:0.85rem; line-height:1.4;">' + escapeHtml((item.content || '').slice(0, 160)) + '...</p>' +
+            reasonPreview +
+            '<div style="margin-top:6px;">' + usage + '</div>' +
+            '<div class="memory-actions">' +
+              '<button type="button" class="promote-btn" data-key="' + encodeURIComponent(item.key) + '" style="background:var(--accent);color:white;border:none;padding:6px 14px;border-radius:6px;font-size:0.8rem;">Promote</button>' +
+            '</div>' +
+          '</article>';
+      }).join('');
+
+      // Refresh button
+      document.getElementById('refresh-suggestions')?.addEventListener('click', loadSuggestions);
+
+      // Promote buttons
+      suggestionsContainer.querySelectorAll('.promote-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const key = decodeURIComponent(btn.dataset.key);
+          if (!confirm('Promote "' + key + '" to long-term persistent memory?')) return;
+
+          btn.textContent = 'Promoting...';
+          btn.disabled = true;
+
+          const res = await fetch('/api/memories/' + encodeURIComponent(key), { method: 'POST' });
+          if (res.ok) {
+            btn.textContent = '✓ Promoted';
+            btn.style.background = '#28a745';
+            setTimeout(() => {
+              loadSuggestions();
+              loadMemories();
+            }, 900);
+          } else {
+            btn.textContent = 'Error';
+            btn.disabled = false;
+          }
+        });
+      });
+    }
   </script>
 </body>
 </html>`))
@@ -513,8 +712,11 @@ func (h *Handler) handleMemories(w http.ResponseWriter, r *http.Request) {
 	query := strings.TrimSpace(r.URL.Query().Get("query"))
 	decisionType := strings.TrimSpace(r.URL.Query().Get("decisionType"))
 	tags := splitCSV(r.URL.Query().Get("tags"))
+	// Project filter: omit -> active project; "*" -> all; "unassigned" -> legacy.
+	// Use raw value (do not trim "*") to preserve wildcard semantics.
+	project := r.URL.Query().Get("project")
 
-	items, err := h.queryMemories(query, tags, decisionType, limit)
+	items, err := h.queryMemories(query, tags, decisionType, project, limit)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -527,8 +729,10 @@ func (h *Handler) handleMemories(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, memoryListResponse{
-		Items: toMemoryDTOs(items),
-		Stats: buildMemoryStats(allItems),
+		Items:         toMemoryDTOs(items),
+		Stats:         buildMemoryStats(allItems),
+		Projects:      h.memory.ListProjects(),
+		ActiveProject: h.memory.ActiveProject(),
 	})
 }
 
@@ -553,12 +757,19 @@ func (h *Handler) handleMemoryByKey(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, toMemoryDTO(mem))
+	case http.MethodPost:
+		// Promote this memory (Fase 3 dashboard action)
+		if err := h.memory.Promote(key, "high"); err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "promoted", "key": key})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
-func (h *Handler) queryMemories(query string, tags []string, decisionType string, limit int) ([]*memory.Memory, error) {
+func (h *Handler) queryMemories(query string, tags []string, decisionType, project string, limit int) ([]*memory.Memory, error) {
 	var (
 		items []*memory.Memory
 		err   error
@@ -566,7 +777,7 @@ func (h *Handler) queryMemories(query string, tags []string, decisionType string
 
 	switch {
 	case query != "" || len(tags) > 0:
-		items, err = h.memory.Search(query, tags)
+		items, err = h.memory.SearchWithProject(query, tags, project)
 	case decisionType != "":
 		items, err = h.memory.ListMemories(limit, decisionType)
 	default:
@@ -574,6 +785,25 @@ func (h *Handler) queryMemories(query string, tags []string, decisionType string
 	}
 	if err != nil {
 		return nil, err
+	}
+
+	// Apply project filter when listing (Search already filtered).
+	if (query == "" && len(tags) == 0) && project != memory.WildcardProject {
+		target := project
+		if target == "" {
+			target = h.memory.ActiveProject()
+		}
+		filtered := make([]*memory.Memory, 0, len(items))
+		for _, item := range items {
+			p := item.Project
+			if p == "" {
+				p = memory.UnassignedProject
+			}
+			if p == target {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
 	}
 
 	if decisionType != "" && (query != "" || len(tags) > 0) {
@@ -612,6 +842,7 @@ func buildMemoryStats(items []*memory.Memory) memoryStats {
 	tags := make(map[string]bool)
 	decisionTypes := make(map[string]bool)
 	decisionCount := 0
+	promotedCount := 0
 
 	for _, item := range items {
 		for _, tag := range item.Tags {
@@ -620,6 +851,9 @@ func buildMemoryStats(items []*memory.Memory) memoryStats {
 		if item.DecisionType != "" {
 			decisionCount++
 			decisionTypes[item.DecisionType] = true
+		}
+		if item.Promoted {
+			promotedCount++
 		}
 	}
 
@@ -634,6 +868,8 @@ func buildMemoryStats(items []*memory.Memory) memoryStats {
 		DecisionCount: decisionCount,
 		TagCount:      len(tags),
 		DecisionTypes: types,
+		// Fase 3
+		PromotedCount: promotedCount,
 	}
 }
 
@@ -655,9 +891,11 @@ func toMemoryDTO(item *memory.Memory) memoryDTO {
 		Tags:         item.Tags,
 		Timestamp:    item.Timestamp,
 		Usage:        item.Usage,
+		Project:      item.Project,
 		DecisionType: item.DecisionType,
 		Reason:       item.Reason,
 		Alternatives: item.Alternatives,
+		Promoted:     item.Promoted, // Fase 3
 	}
 }
 
@@ -665,4 +903,112 @@ func writeJSON(w http.ResponseWriter, status int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+// handleProjectSummary returns a lightweight project summary for session start.
+// This is the first enrichment from mcp-go-context to src/context.
+func (h *Handler) handleProjectSummary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if h.analyzer == nil {
+		http.Error(w, "analyzer not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Get project path from query or default to first configured path
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		path = "."
+	}
+
+	depth := 2 // lightweight by default
+	if rawDepth := r.URL.Query().Get("depth"); rawDepth != "" {
+		if parsed, err := strconv.Atoi(rawDepth); err == nil && parsed > 0 && parsed <= 5 {
+			depth = parsed
+		}
+	}
+
+	structure, err := h.analyzer.AnalyzeProject(path, depth)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Build a concise summary (not the full structure)
+	summary := map[string]any{
+		"rootPath":      structure.RootPath,
+		"totalFiles":    0,
+		"languages":      map[string]int{},
+		"topDirectories": []string{},
+		"stats": map[string]any{
+			"totalSize": 0,
+		},
+		// Fase 0: light index status for cold-start observability
+		"lightIndex": map[string]any{
+			"enabled": true,
+		},
+	}
+
+	// Enrich with actual light index state if analyzer supports it
+	if stats := h.analyzer.LightIndexStats(); stats != nil {
+		summary["lightIndex"] = stats
+	}
+
+	// Count files and languages
+	if structure.Structure != nil {
+		dirCount := 0
+		for dir := range structure.Structure {
+			summary["topDirectories"] = append(summary["topDirectories"].([]string), dir)
+			dirCount++
+		}
+		// Keep only top 10 directories
+		if dirs := summary["topDirectories"].([]string); len(dirs) > 10 {
+			summary["topDirectories"] = dirs[:10]
+		}
+		_ = dirCount // suppress unused warning
+	}
+
+	writeJSON(w, http.StatusOK, summary)
+}
+
+// handleQuickContext returns context for a specific query without full analysis.
+// This enables on-demand context enrichment from src/context.
+func (h *Handler) handleQuickContext(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if h.analyzer == nil {
+		http.Error(w, "analyzer not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	query := r.URL.Query().Get("query")
+	if query == "" {
+		http.Error(w, "query parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	maxTokens := 2000
+	if rawTokens := r.URL.Query().Get("maxTokens"); rawTokens != "" {
+		if parsed, err := strconv.Atoi(rawTokens); err == nil && parsed > 0 && parsed <= 10000 {
+			maxTokens = parsed
+		}
+	}
+
+	context, err := h.analyzer.GetRelevantContext(query, nil, maxTokens)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"query":    query,
+		"context":  context,
+		"truncated": len(context) > maxTokens*4, // rough token estimate
+	})
 }

@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,7 +19,7 @@ func TestMemoryStoreAndRetrieve(t *testing.T) {
 		SessionTTLDays: 30,
 	}
 
-	m, err := New(cfg)
+	m, err := New(cfg, "testproj")
 	if err != nil {
 		t.Fatalf("New() failed: %v", err)
 	}
@@ -53,7 +54,7 @@ func TestMemorySearch(t *testing.T) {
 		SessionTTLDays: 30,
 	}
 
-	m, err := New(cfg)
+	m, err := New(cfg, "testproj")
 	if err != nil {
 		t.Fatalf("New() failed: %v", err)
 	}
@@ -87,7 +88,7 @@ func TestMemorySearchByTags(t *testing.T) {
 		SessionTTLDays: 30,
 	}
 
-	m, err := New(cfg)
+	m, err := New(cfg, "testproj")
 	if err != nil {
 		t.Fatalf("New() failed: %v", err)
 	}
@@ -120,7 +121,7 @@ func TestMemoryMaxEntriesEviction(t *testing.T) {
 		SessionTTLDays: 30,
 	}
 
-	m, err := New(cfg)
+	m, err := New(cfg, "testproj")
 	if err != nil {
 		t.Fatalf("New() failed: %v", err)
 	}
@@ -153,7 +154,7 @@ func TestMemoryStoreWithType(t *testing.T) {
 		SessionTTLDays: 30,
 	}
 
-	m, err := New(cfg)
+	m, err := New(cfg, "testproj")
 	if err != nil {
 		t.Fatalf("New() failed: %v", err)
 	}
@@ -197,7 +198,7 @@ func TestMemorySearchDecisions(t *testing.T) {
 		SessionTTLDays: 30,
 	}
 
-	m, err := New(cfg)
+	m, err := New(cfg, "testproj")
 	if err != nil {
 		t.Fatalf("New() failed: %v", err)
 	}
@@ -277,7 +278,7 @@ func TestMemoryClear(t *testing.T) {
 		SessionTTLDays: 30,
 	}
 
-	m, err := New(cfg)
+	m, err := New(cfg, "testproj")
 	if err != nil {
 		t.Fatalf("New() failed: %v", err)
 	}
@@ -311,7 +312,7 @@ func TestMemoryGetRecentMemories(t *testing.T) {
 		SessionTTLDays: 30,
 	}
 
-	m, err := New(cfg)
+	m, err := New(cfg, "testproj")
 	if err != nil {
 		t.Fatalf("New() failed: %v", err)
 	}
@@ -347,7 +348,7 @@ func TestGetDecisionTypes(t *testing.T) {
 		SessionTTLDays: 30,
 	}
 
-	m, err := New(cfg)
+	m, err := New(cfg, "testproj")
 	if err != nil {
 		t.Fatalf("New() failed: %v", err)
 	}
@@ -375,7 +376,7 @@ func TestRetrieveIncrementsStoredUsage(t *testing.T) {
 		SessionTTLDays: 30,
 	}
 
-	m, err := New(cfg)
+	m, err := New(cfg, "testproj")
 	if err != nil {
 		t.Fatalf("New() failed: %v", err)
 	}
@@ -403,7 +404,7 @@ func TestRetrievePersistsUsageToDisk(t *testing.T) {
 		SessionTTLDays: 30,
 	}
 
-	m, err := New(cfg)
+	m, err := New(cfg, "testproj")
 	if err != nil {
 		t.Fatalf("New() failed: %v", err)
 	}
@@ -416,7 +417,7 @@ func TestRetrievePersistsUsageToDisk(t *testing.T) {
 		t.Fatalf("Retrieve() failed: %v", err)
 	}
 
-	reloaded, err := New(cfg)
+	reloaded, err := New(cfg, "testproj")
 	if err != nil {
 		t.Fatalf("New() reload failed: %v", err)
 	}
@@ -440,7 +441,7 @@ func TestCleanupRemovesIndexEntriesForExpiredSessions(t *testing.T) {
 		SessionTTLDays: 1,
 	}
 
-	m, err := New(cfg)
+	m, err := New(cfg, "testproj")
 	if err != nil {
 		t.Fatalf("New() failed: %v", err)
 	}
@@ -481,7 +482,7 @@ func TestListMemoriesFiltersByDecisionType(t *testing.T) {
 		SessionTTLDays: 30,
 	}
 
-	m, err := New(cfg)
+	m, err := New(cfg, "testproj")
 	if err != nil {
 		t.Fatalf("New() failed: %v", err)
 	}
@@ -512,7 +513,7 @@ func TestDeleteRemovesMemoryAndIndexes(t *testing.T) {
 		SessionTTLDays: 30,
 	}
 
-	m, err := New(cfg)
+	m, err := New(cfg, "testproj")
 	if err != nil {
 		t.Fatalf("New() failed: %v", err)
 	}
@@ -532,4 +533,325 @@ func TestDeleteRemovesMemoryAndIndexes(t *testing.T) {
 	if len(m.tagIndex) != 0 || len(m.wordIndex) != 0 {
 		t.Fatalf("expected indexes to be empty after delete, got tags=%v words=%v", m.tagIndex, m.wordIndex)
 	}
+}
+
+func TestInferProject(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty -> default", "", "default"},
+		{"windows path", `C:\MCPs\clone\mcp-go-context`, "mcp-go-context"},
+		{"windows trailing slash", `C:\MCPs\clone\mcp-go-context\`, "mcp-go-context"},
+		{"unix path", "/home/user/my-app", "my-app"},
+		{"path with spaces", "/home/user/my project", "my-project"},
+		{"path with accents", "/home/user/café", "cafe"},
+		{"path with ñ", "/home/user/españa", "espana"},
+		{"emoji only -> default", "/tmp/💥", "default"},
+		{"drive letter only -> default", `C:\`, "default"},
+		{"uppercase normalized", "/srv/MyApp", "myapp"},
+		{"mixed punctuation", "/srv/my.cool_app!", "my-cool-app"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := InferProject(tc.in); got != tc.want {
+				t.Errorf("InferProject(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMemoryProjectIsolation(t *testing.T) {
+	cfg := config.MemoryConfig{
+		Enabled:        true,
+		StoragePath:    t.TempDir(),
+		MaxEntries:     100,
+		MaxResults:     10,
+		SessionTTLDays: 30,
+	}
+	m, err := New(cfg, "alpha")
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+
+	// Store one in alpha.
+	if err := m.Store("k-alpha", "alpha content about widgets", []string{"alpha"}); err != nil {
+		t.Fatalf("Store alpha failed: %v", err)
+	}
+
+	// Inject a memory that pretends to belong to project "beta" by manipulating activeProject.
+	m.activeProject = "beta"
+	if err := m.Store("k-beta", "beta content about widgets", []string{"beta"}); err != nil {
+		t.Fatalf("Store beta failed: %v", err)
+	}
+
+	// Search active (beta) should only return beta.
+	results, err := m.Search("widgets", nil)
+	if err != nil {
+		t.Fatalf("Search() failed: %v", err)
+	}
+	if len(results) != 1 || results[0].Key != "k-beta" {
+		t.Fatalf("active-project search should return only k-beta, got %v", keysOf(results))
+	}
+
+	// Explicit alpha filter.
+	results, err = m.SearchWithProject("widgets", nil, "alpha")
+	if err != nil {
+		t.Fatalf("SearchWithProject(alpha) failed: %v", err)
+	}
+	if len(results) != 1 || results[0].Key != "k-alpha" {
+		t.Fatalf("alpha filter should return only k-alpha, got %v", keysOf(results))
+	}
+
+	// Wildcard returns both.
+	results, err = m.SearchWithProject("widgets", nil, WildcardProject)
+	if err != nil {
+		t.Fatalf("SearchWithProject(*) failed: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("wildcard should return 2 memories, got %d: %v", len(results), keysOf(results))
+	}
+}
+
+func TestMemoryUnassignedLegacy(t *testing.T) {
+	cfg := config.MemoryConfig{
+		Enabled:        true,
+		StoragePath:    t.TempDir(),
+		MaxEntries:     100,
+		MaxResults:     10,
+		SessionTTLDays: 30,
+	}
+	m, err := New(cfg, "current")
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+
+	// Simulate a legacy memory by direct injection (empty Project).
+	sess := m.getCurrentSession()
+	sess.Memories["legacy"] = Memory{
+		Key:       "legacy",
+		Content:   "old data about widgets",
+		Tags:      []string{"old"},
+		Timestamp: time.Now(),
+	}
+	m.addToIndexes("legacy", sess.Memories["legacy"])
+
+	// Active project search must NOT include legacy.
+	results, _ := m.Search("widgets", nil)
+	for _, r := range results {
+		if r.Key == "legacy" {
+			t.Fatalf("legacy memory leaked into active-project search")
+		}
+	}
+
+	// Explicit unassigned filter must include legacy.
+	results, _ = m.SearchWithProject("widgets", nil, UnassignedProject)
+	found := false
+	for _, r := range results {
+		if r.Key == "legacy" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("unassigned filter should surface legacy memory, got %v", keysOf(results))
+	}
+}
+
+func TestListProjects(t *testing.T) {
+	cfg := config.MemoryConfig{
+		Enabled:        true,
+		StoragePath:    t.TempDir(),
+		MaxEntries:     100,
+		MaxResults:     10,
+		SessionTTLDays: 30,
+	}
+	m, err := New(cfg, "active")
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+
+	m.Store("a", "x", nil)
+	m.Store("b", "y", nil)
+	m.activeProject = "other"
+	m.Store("c", "z", nil)
+	m.activeProject = "active"
+
+	// Inject a legacy entry.
+	sess := m.getCurrentSession()
+	sess.Memories["legacy"] = Memory{Key: "legacy", Content: "old", Timestamp: time.Now()}
+
+	stats := m.ListProjects()
+	counts := map[string]int{}
+	var activeStat ProjectStat
+	for _, s := range stats {
+		counts[s.Project] = s.Count
+		if s.Active {
+			activeStat = s
+		}
+	}
+	if counts["active"] != 2 {
+		t.Errorf("expected 2 in active, got %d (stats=%v)", counts["active"], stats)
+	}
+	if counts["other"] != 1 {
+		t.Errorf("expected 1 in other, got %d", counts["other"])
+	}
+	if counts[UnassignedProject] != 1 {
+		t.Errorf("expected 1 in unassigned, got %d", counts[UnassignedProject])
+	}
+	if activeStat.Project != "active" {
+		t.Errorf("expected active flag on 'active', got %q", activeStat.Project)
+	}
+}
+
+func keysOf(mems []*Memory) []string {
+	out := make([]string, 0, len(mems))
+	for _, m := range mems {
+		out = append(out, m.Key)
+	}
+	return out
+}
+
+// Fase 1 tests for intelligent promotion suggestions
+
+func TestMemorySuggestForPromotion(t *testing.T) {
+	cfg := config.MemoryConfig{
+		Enabled:        true,
+		StoragePath:    t.TempDir(),
+		MaxEntries:     100,
+		MaxResults:     20,
+		SessionTTLDays: 30,
+	}
+
+	m, err := New(cfg, "testproj")
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+
+	now := time.Now()
+
+	// High-value candidate: structured decision with reason
+	m.StoreWithType("arch-decision", "Use PostgreSQL for primary DB", []string{"db", "architecture"},
+		"architecture", "Better ACID compliance and ecosystem", []string{"MySQL", "SQLite"})
+
+	// Another strong candidate: recent fix with usage
+	m.StoreWithType("fix-leak", "Fixed memory leak in worker pool", []string{"bug", "performance"},
+		"fix", "Valgrind + pprof confirmed leak in goroutine", nil)
+
+	// Simulate usage on the fix
+	for i := 0; i < 6; i++ {
+		m.Retrieve("fix-leak")
+	}
+
+	// Weak candidate: plain memory, no structure, old
+	oldTime := now.Add(-30 * 24 * time.Hour)
+	sess := m.getCurrentSession()
+	sess.Memories["weak-note"] = Memory{
+		Key:       "weak-note",
+		Content:   "Some random note about nothing important",
+		Timestamp: oldTime,
+		Usage:     0,
+	}
+
+	// Promoted memory — must be excluded from suggestions
+	m.StoreWithType("already-good", "We decided on this long ago", []string{"decision"},
+		"architecture", "It was the right call", nil)
+	m.Promote("already-good", "high")
+
+	// Call suggestion
+	suggestions, err := m.SuggestForPromotion(5)
+	if err != nil {
+		t.Fatalf("SuggestForPromotion() failed: %v", err)
+	}
+
+	if len(suggestions) == 0 {
+		t.Fatal("expected at least one promotion suggestion")
+	}
+
+	// The two strong ones should be present
+	keys := keysOf(suggestions)
+	if !contains(keys, "arch-decision") && !contains(keys, "fix-leak") {
+		t.Errorf("expected strong decisions in suggestions, got %v", keys)
+	}
+
+	// Promoted item must NOT appear
+	for _, s := range suggestions {
+		if s.Key == "already-good" {
+			t.Error("promoted memory should never be suggested for promotion")
+		}
+		if s.Key == "weak-note" {
+			t.Error("weak unstructured old memory should not be suggested")
+		}
+	}
+
+	// Check ordering preference: structured decision should usually rank high
+	// (fix-leak has high usage + type, arch-decision has full structure)
+}
+
+func TestMemorySuggestForPromotionLimit(t *testing.T) {
+	cfg := config.MemoryConfig{
+		Enabled:        true,
+		StoragePath:    t.TempDir(),
+		MaxEntries:     100,
+		MaxResults:     20,
+		SessionTTLDays: 30,
+	}
+
+	m, err := New(cfg, "testproj")
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+
+	// Create 8 decent candidates
+	for i := 0; i < 8; i++ {
+		key := fmt.Sprintf("good-decision-%d", i)
+		m.StoreWithType(key, fmt.Sprintf("Important choice %d", i),
+			[]string{"decision"}, "technical", "It made sense", nil)
+	}
+
+	suggestions, err := m.SuggestForPromotion(3)
+	if err != nil {
+		t.Fatalf("SuggestForPromotion failed: %v", err)
+	}
+
+	if len(suggestions) > 3 {
+		t.Errorf("expected at most 3 suggestions with limit=3, got %d", len(suggestions))
+	}
+}
+
+func TestMemorySuggestForPromotionEmpty(t *testing.T) {
+	cfg := config.MemoryConfig{
+		Enabled:        true,
+		StoragePath:    t.TempDir(),
+		MaxEntries:     100,
+		MaxResults:     10,
+		SessionTTLDays: 30,
+	}
+
+	m, err := New(cfg, "testproj")
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+
+	// Only promoted memories
+	m.StoreWithType("p1", "Old decision", nil, "architecture", "reason", nil)
+	m.Promote("p1", "high")
+
+	suggestions, err := m.SuggestForPromotion(5)
+	if err != nil {
+		t.Fatalf("SuggestForPromotion failed: %v", err)
+	}
+
+	if len(suggestions) != 0 {
+		t.Errorf("expected 0 suggestions when everything is promoted, got %d", len(suggestions))
+	}
+}
+
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }

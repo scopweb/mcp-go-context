@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/scopweb/mcp-go-context/internal/analyzer"
 	"github.com/scopweb/mcp-go-context/internal/buildinfo"
@@ -47,12 +48,16 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to create analyzer: %w", err)
 	}
 
-	memoryManager, err := memory.New(cfg.Memory)
+	// Infer active project slug from cwd; falls back to "default" inside InferProject.
+	cwd, _ := os.Getwd()
+	activeProject := memory.InferProject(cwd)
+
+	memoryManager, err := memory.New(cfg.Memory, activeProject)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create memory manager: %w", err)
 	}
 
-	dashboardHandler, err := dashboard.New(memoryManager)
+	dashboardHandler, err := dashboard.New(memoryManager, projectAnalyzer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create dashboard handler: %w", err)
 	}
@@ -83,7 +88,9 @@ func (s *Server) Start(ctx context.Context) error {
 		Name:    "MCP Context Server",
 		Version: buildinfo.Version,
 		Instructions: `This server provides intelligent context management for coding assistance.
-It analyzes your project, fetches relevant documentation, and maintains conversation memory.`,
+It analyzes your project, fetches relevant documentation, and maintains conversation memory.
+Memory convergence: use promote-memory to mark high-value items for long-term persistence.
+Session memory stays in summary.md; promoted memories persist in MCP memory.`,
 	}
 
 	// Start transport
@@ -184,17 +191,32 @@ func (s *Server) handleInitialize(id interface{}, protocolVersion string) (inter
 			"name":    "MCP Context Server",
 			"version": buildinfo.Version,
 		},
-		"instructions": `This server provides intelligent context management for coding assistance.
+		"instructions": `This server provides project context analysis and persistent technical memory for coding assistants.
+
+MEMORY CONVERGENCE (very important):
+This server works together with Claude's SessionMemory (summary.md).
+- Use SessionMemory for transient session summarization.
+- Use this server for durable, high-value technical knowledge that should survive across sessions.
+
+RECOMMENDED MEMORY WORKFLOW:
+1. When you make important technical decisions, fixes or establish conventions → call save-decision (include type, reason and alternatives when possible).
+2. Before finishing a complex task or long session → call suggest-promotions to discover what deserves to be kept long-term.
+3. Review the suggestions and use promote-memory on the most valuable items.
+4. In future sessions, promoted memories will be automatically surfaced by get-context and search-memory.
+
 Available tools:
-- analyze-project: Analyzes project structure, dependencies, and provides comprehensive context
-- get-context: Retrieves relevant context for the current task based on files, dependencies, and conversation history
-- fetch-docs: Fetches documentation for libraries and dependencies
-- remember-conversation: Stores important context from the current conversation for future reference
-- dependency-analysis: Analyzes project dependencies and suggests relevant documentation
-- changed-files-context: Gets context from files changed in recent git commits
-- search-memory: Advanced search through conversation memory with ranking by relevance, recency, and usage
-- save-decision: Records a technical decision with structured metadata for future reference
-- get-decisions: Retrieves technical decisions, optionally filtered by type or keyword`,
+- analyze-project: Full project structure, languages, dependencies and key files.
+- get-context: Best entry point for most queries. Returns relevant code + memories for a topic (automatically handles cold-start).
+- changed-files-context: Gets context from recent git changes (very useful for understanding current work).
+- fetch-docs: Library documentation via Context7 with local fallback.
+- dependency-analysis: Project dependencies with recommendations.
+- remember-conversation: Store free-form important context with tags.
+- save-decision: Record a technical decision with structured metadata (decisionType, reason, alternatives). Preferred for architecture, fixes and conventions.
+- get-decisions: Retrieve decisions filtered by type or keyword.
+- search-memory: Full-text search across all memories with relevance + recency scoring. Use project="*" for cross-project search.
+- suggest-promotions: Analyzes existing memories and returns the best candidates to promote to long-term storage. Call this regularly before ending work sessions.
+- promote-memory: Marks a memory as high-value for persistent storage (the core of memory convergence).
+- get-promoted-memories: Lists only the memories that have been explicitly promoted for long-term retention.`,
 	}, nil
 }
 
@@ -395,7 +417,7 @@ func (s *Server) registerTools() {
 	// search-memory tool
 	s.tools.Register(&tools.Tool{
 		Name:        "search-memory",
-		Description: "Advanced search through conversation memory with ranking by relevance, recency, and usage",
+		Description: "Powerful search across all memories with smart ranking (relevance + recency + usage). Use this when get-context doesn't surface what you need. Pass project=\"*\" to search across all projects.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -410,6 +432,10 @@ func (s *Server) registerTools() {
 						"type": "string",
 					},
 				},
+				"project": map[string]interface{}{
+					"type":        "string",
+					"description": "Project slug to filter by. Omit to use the active project, '*' for all projects, 'unassigned' for legacy memories.",
+				},
 				"limit": map[string]interface{}{
 					"type":        "integer",
 					"description": "Maximum number of results (default: 10)",
@@ -422,7 +448,7 @@ func (s *Server) registerTools() {
 	// save-decision tool
 	s.tools.Register(&tools.Tool{
 		Name:        "save-decision",
-		Description: "Records a technical decision with structured metadata for future reference",
+		Description: "Records a technical decision with rich metadata. Preferred tool for architecture choices, important fixes, and team conventions. Include 'reason' and 'alternatives' when possible — this greatly increases the chance it will be suggested for long-term promotion later.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -465,7 +491,7 @@ func (s *Server) registerTools() {
 	// get-decisions tool
 	s.tools.Register(&tools.Tool{
 		Name:        "get-decisions",
-		Description: "Retrieves technical decisions, optionally filtered by type or keyword",
+		Description: "Retrieves technical decisions with optional filtering by type or keyword. Complements search-memory when you want structured decision history.",
 		InputSchema: map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{
@@ -484,5 +510,58 @@ func (s *Server) registerTools() {
 			},
 		},
 		Handler: tools.GetDecisionsHandler,
+	})
+
+	// promote-memory tool - marks a memory as high-value for persistence (Phase 6)
+	s.tools.Register(&tools.Tool{
+		Name:        "promote-memory",
+		Description: "Promotes a memory to long-term persistent storage. This is the core action of memory convergence. After calling suggest-promotions, use this on the best candidates. Promoted memories survive sessions and are prioritized in get-context.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"key": map[string]interface{}{
+					"type":        "string",
+					"description": "Memory key to promote",
+				},
+				"confidence": map[string]interface{}{
+					"type":        "string",
+					"description": "Confidence level: low, medium, high (default: high)",
+				},
+			},
+			"required": []string{"key"},
+		},
+		Handler: tools.PromoteMemoryHandler,
+	})
+
+	// get-promoted-memories tool - returns only promoted (high-value) memories
+	s.tools.Register(&tools.Tool{
+		Name:        "get-promoted-memories",
+		Description: "Returns only the memories that have been explicitly promoted to long-term storage. These are the highest-value items that should influence future decisions. Use this to review what has been preserved across sessions.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"limit": map[string]interface{}{
+					"type":        "integer",
+					"description": "Maximum number of results (default: 10)",
+				},
+			},
+		},
+		Handler: tools.GetPromotedMemoriesHandler,
+	})
+
+	// suggest-promotions tool (Fase 1) - intelligent suggestions for what to promote
+	s.tools.Register(&tools.Tool{
+		Name:        "suggest-promotions",
+		Description: "The key tool for memory hygiene. Analyzes all memories using multiple signals (structure, usage, recency, decision language) and returns the best candidates worth promoting with promote-memory. Call this at the end of complex sessions or before context switching.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"limit": map[string]interface{}{
+					"type":        "integer",
+					"description": "Maximum number of suggestions to return (default: 5)",
+				},
+			},
+		},
+		Handler: tools.SuggestPromotionsHandler,
 	})
 }

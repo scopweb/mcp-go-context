@@ -52,3 +52,14 @@ Promocion inicial recomendada:
 ## Definicion de terminado
 
 Existe una politica clara y minimalista para subir solo el contenido de alto valor a memoria persistente.
+
+## Estado actual (2026)
+
+**Avance significativo implementado**:
+- Se creó la tool `suggest-promotions` como interfaz principal de descubrimiento selectivo.
+- Se implementó `SuggestForPromotion()` en el memory manager con una heurística transparente y mejorada (estructura de decisión, usage, recencia, keywords ponderadas, tipo de decisión, alternativas y tags).
+- El flujo recomendado ahora es: `save-decision` → `suggest-promotions` → `promote-memory`.
+- Se mejoraron las instrucciones del `initialize` y las descripciones de tools para guiar mejor a los modelos.
+- Tests dedicados para la lógica de sugerencias.
+
+Esto cumple en gran medida con el objetivo de "interfaz minima de promocion" sin sincronización completa ni ruido automático. La promoción sigue siendo explícita y de alta calidad.

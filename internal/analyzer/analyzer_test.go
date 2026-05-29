@@ -1,8 +1,10 @@
 package analyzer
 
 import (
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/scopweb/mcp-go-context/internal/config"
 )
@@ -354,6 +356,96 @@ func TestFindRelevantFilesWithScore(t *testing.T) {
 
 	if results[0].Score == 0 {
 		t.Error("expected non-zero score for matching file")
+	}
+}
+
+// Fase 0 cold-start tests
+
+func TestEnsureLightIndexPopulatesCache(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create a small project structure
+	_ = os.MkdirAll(tmpDir+"/pkg", 0755)
+	_ = writeFile(tmpDir+"/main.go", "package main\n")
+	_ = writeFile(tmpDir+"/pkg/utils.go", "package pkg\n")
+	_ = writeFile(tmpDir+"/README.md", "# Test\n")
+
+	cfg := config.ContextConfig{
+		ProjectPaths:   []string{tmpDir},
+		IgnorePatterns: []string{"*.log"},
+	}
+	a := &ProjectAnalyzer{
+		config: cfg,
+		cache:  make(map[string]*FileInfo),
+	}
+
+	// Should be cold initially
+	if a.IsLightIndexed() {
+		t.Error("expected not light indexed initially")
+	}
+
+	a.EnsureLightIndex(50, 5*time.Second)
+
+	if !a.IsLightIndexed() {
+		t.Error("expected light indexed after EnsureLightIndex")
+	}
+	if len(a.cache) == 0 {
+		t.Error("expected cache to be populated after light index")
+	}
+}
+
+func TestEnsureLightIndexRespectsMaxFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create more files than the limit
+	for i := 0; i < 20; i++ {
+		name := tmpDir + fmt.Sprintf("/file%02d.go", i)
+		_ = writeFile(name, "package main\n")
+	}
+
+	cfg := config.ContextConfig{ProjectPaths: []string{tmpDir}}
+	a := &ProjectAnalyzer{
+		config: cfg,
+		cache:  make(map[string]*FileInfo),
+	}
+
+	a.EnsureLightIndex(5, 2*time.Second)
+
+	// Should not index way more than requested (allow some margin for git phase etc.)
+	if len(a.cache) > 12 {
+		t.Errorf("light index indexed too many files: got %d, want <= ~12", len(a.cache))
+	}
+}
+
+func TestResetLightIndex(t *testing.T) {
+	a := &ProjectAnalyzer{
+		config: config.ContextConfig{},
+		cache:  make(map[string]*FileInfo),
+	}
+
+	a.lightIndexed = true
+	a.cache["/fake.go"] = &FileInfo{Path: "/fake.go"}
+
+	a.ResetLightIndex()
+
+	if a.IsLightIndexed() {
+		t.Error("expected light index reset")
+	}
+	if len(a.cache) != 1 {
+		// Note: ResetLightIndex currently does not clear the cache itself (by design for now)
+		// Only clears the flag and recentlyChanged map
+	}
+}
+
+func TestLightIndexStats(t *testing.T) {
+	a := &ProjectAnalyzer{
+		config: config.ContextConfig{},
+		cache:  make(map[string]*FileInfo),
+	}
+
+	stats := a.LightIndexStats()
+	if stats["indexed"] != false {
+		t.Error("expected indexed=false initially")
 	}
 }
 

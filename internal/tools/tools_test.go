@@ -48,6 +48,18 @@ func (f fakeAnalyzer) GetRecentlyChangedFiles(string, int) ([]analyzer.ChangedFi
 	return f.changedFiles, nil
 }
 
+func (f fakeAnalyzer) EnsureLightIndex(int, time.Duration) {
+	// no-op in fake
+}
+
+func (f fakeAnalyzer) IsLightIndexed() bool {
+	return false
+}
+
+func (f fakeAnalyzer) LightIndexStats() map[string]interface{} {
+	return map[string]interface{}{"indexed": false}
+}
+
 type fakeMemory struct {
 	results   []*memory.Memory
 	decisions []*memory.Memory
@@ -65,11 +77,25 @@ func (f fakeMemory) Search(string, []string) ([]*memory.Memory, error) {
 	return f.results, nil
 }
 
+func (f fakeMemory) SearchWithProject(string, []string, string) ([]*memory.Memory, error) {
+	return f.results, nil
+}
+
+func (f fakeMemory) ActiveProject() string { return "test" }
+
 func (f fakeMemory) SearchDecisions(string, string, int) ([]*memory.Memory, error) {
 	return f.decisions, nil
 }
 
 func (f fakeMemory) GetDecisionTypes() ([]string, error) { return nil, nil }
+
+func (f fakeMemory) GetPromotedMemories(int) ([]*memory.Memory, error) { return nil, nil }
+
+func (f fakeMemory) Promote(string, string) error { return nil }
+
+func (f fakeMemory) Demote(string) error { return nil }
+
+func (f fakeMemory) SuggestForPromotion(int) ([]*memory.Memory, error) { return nil, nil }
 
 func TestAnalyzeProjectHandlerUsesConcreteTypes(t *testing.T) {
 	server := fakeServer{

@@ -34,3 +34,10 @@ Este backlog evita dos errores:
 2. intentar replicar `MemPalace` como sistema generalista
 
 La direccion correcta es fortalecer `mcp-go-context` como capa Go de contexto tecnico y memoria operativa.
+
+## Actualizaciones recientes (Fase 0 + Fase 1)
+
+- TECH-01 (cold-start): Implementado y probado (`EnsureLightIndex`, git prioritization, tests).
+- TECH-06 (promoción selectiva): Avance importante con `suggest-promotions` + heurística mejorada + flujo recomendado documentado.
+- Instrucciones del `initialize` actualizadas para guiar mejor el uso de memoria.
+- Documentación (README + skill + issues) actualizada.

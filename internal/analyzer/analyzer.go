@@ -17,10 +17,22 @@ import (
 	"github.com/scopweb/mcp-go-context/internal/config"
 )
 
+// Fase 0 cold-start defaults
+const (
+	DefaultLightIndexMaxFiles    = 400
+	DefaultLightIndexMaxDuration = 1800 * time.Millisecond
+	LightIndexCooldown           = 5 * time.Minute
+)
+
 // ProjectAnalyzer analyzes project structure and content
 type ProjectAnalyzer struct {
 	config config.ContextConfig
 	cache  map[string]*FileInfo
+
+	// Light index state for cold-start optimization (Fase 0)
+	lightIndexed     bool
+	lightIndexedAt   time.Time
+	recentlyChanged  map[string]bool // basenames of files changed in recent git commits
 }
 
 // FileInfo contains information about a file
@@ -237,10 +249,9 @@ func (a *ProjectAnalyzer) GetRelevantContext(query string, files []string, maxTo
 		}
 	} else {
 		// Find relevant files based on query
-		// FASE 1 FIX: If cache is empty, do quick discovery before searching
-		if len(a.cache) == 0 {
-			a.quickDiscovery()
-		}
+		// Fase 0: Ensure we have a light index on cold start (bounded + git-aware)
+		a.EnsureLightIndex(DefaultLightIndexMaxFiles, DefaultLightIndexMaxDuration)
+
 		relevantFiles := a.findRelevantFiles(query)
 		for _, file := range relevantFiles {
 			content, err := a.getFileContext(file.Path, maxTokens-tokenCount)
@@ -259,43 +270,102 @@ func (a *ProjectAnalyzer) GetRelevantContext(query string, files []string, maxTo
 	return context.String(), nil
 }
 
-// quickDiscovery does minimal project index when cache is empty (cold start fix)
-func (a *ProjectAnalyzer) quickDiscovery() {
-	// Iterate over all configured project paths
+// EnsureLightIndex performs a bounded, git-aware light index of the project.
+// This makes get-context useful on cold start without requiring analyze-project.
+// It prioritizes recently changed files (via git) and limits work by file count and time.
+func (a *ProjectAnalyzer) EnsureLightIndex(maxFiles int, maxDuration time.Duration) {
+	if maxFiles <= 0 {
+		maxFiles = 300
+	}
+	if maxDuration <= 0 {
+		maxDuration = 1500 * time.Millisecond
+	}
+
+	// Avoid re-indexing too frequently
+	if a.lightIndexed && time.Since(a.lightIndexedAt) < LightIndexCooldown {
+		return
+	}
+
+	start := time.Now()
+	filesIndexed := 0
+
+	// Phase 1: Git-first — index recently changed files immediately (highest value for context)
 	for _, projectPath := range a.config.ProjectPaths {
+		changed, err := a.GetRecentlyChangedFiles(projectPath, 8)
+		if err == nil && len(changed) > 0 {
+			for _, cf := range changed {
+				if filesIndexed >= maxFiles || time.Since(start) > maxDuration {
+					break
+				}
+				// Build full path
+				absRoot, _ := filepath.Abs(projectPath)
+				fullPath := filepath.Join(absRoot, cf.Path)
+				if _, err := os.Stat(fullPath); err == nil {
+					if info, err := a.analyzeFile(fullPath); err == nil {
+						a.cache[fullPath] = info
+						filesIndexed++
+						if a.recentlyChanged == nil {
+							a.recentlyChanged = make(map[string]bool)
+						}
+						a.recentlyChanged[filepath.Base(cf.Path)] = true
+					}
+				}
+			}
+		}
+	}
+
+	// Phase 2: Bounded walk for the rest of the project (if we still have budget)
+	for _, projectPath := range a.config.ProjectPaths {
+		if filesIndexed >= maxFiles || time.Since(start) > maxDuration {
+			break
+		}
+
 		absPath, err := filepath.Abs(projectPath)
 		if err != nil {
 			continue
 		}
 
-		// Walk the project directory
-		filepath.WalkDir(absPath, func(path string, d fs.DirEntry, err error) error {
+		_ = filepath.WalkDir(absPath, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return nil
 			}
 
+			if filesIndexed >= maxFiles || time.Since(start) > maxDuration {
+				return filepath.SkipDir
+			}
+
 			if d.IsDir() {
-				// Skip ignored directories
 				if a.shouldIgnore(path) {
 					return filepath.SkipDir
 				}
 				return nil
 			}
 
-			// Skip ignored files
 			if a.shouldIgnore(path) {
 				return nil
 			}
 
-			// Analyze the file and cache it
+			// Skip if we already indexed this file (e.g. from git phase)
+			if _, exists := a.cache[path]; exists {
+				return nil
+			}
+
 			info, err := a.analyzeFile(path)
 			if err == nil {
 				a.cache[path] = info
+				filesIndexed++
 			}
-
 			return nil
 		})
 	}
+
+	a.lightIndexed = true
+	a.lightIndexedAt = time.Now()
+}
+
+// quickDiscovery kept for backward compatibility (delegates to EnsureLightIndex)
+func (a *ProjectAnalyzer) quickDiscovery() {
+	a.EnsureLightIndex(DefaultLightIndexMaxFiles, DefaultLightIndexMaxDuration)
 }
 
 // AnalyzeDependencies analyzes project dependencies
@@ -717,9 +787,10 @@ func (a *ProjectAnalyzer) findRelevantFiles(query string) []*FileInfo {
 	for _, file := range a.cache {
 		score := 0
 
-		// Check filename
-		if strings.Contains(strings.ToLower(filepath.Base(file.Path)), queryLower) {
-			score += 10
+		// Check filename match (strong signal)
+		base := filepath.Base(file.Path)
+		if strings.Contains(strings.ToLower(base), queryLower) {
+			score += 12
 		}
 
 		// Check imports (for Go files)
@@ -729,17 +800,29 @@ func (a *ProjectAnalyzer) findRelevantFiles(query string) []*FileInfo {
 			}
 		}
 
-		// Boost score for recently modified files
+		// Boost for recently modified on disk (last 7 days)
 		if file.LastModified > 0 {
-			// Files modified in last 7 days get a boost
 			if time.Now().Unix()-file.LastModified < 7*24*60*60 {
-				score += 3
+				score += 4
 			}
+		}
+
+		// Strong boost for files we know are recently changed in git (populated during EnsureLightIndex)
+		if a.recentlyChanged != nil && a.recentlyChanged[base] {
+			score += 10
 		}
 
 		if score > 0 {
 			file.Score = score
 			relevant = append(relevant, file)
+		}
+	}
+
+	// Apply additional git history boost when possible (uses GetGitInfo)
+	if len(relevant) > 0 {
+		// Use first project path as reference
+		if len(a.config.ProjectPaths) > 0 {
+			a.boostFromGit(relevant, a.config.ProjectPaths[0])
 		}
 	}
 
@@ -850,7 +933,8 @@ func (a *ProjectAnalyzer) GetGitInfo(rootPath string) (*GitInfo, error) {
 	return info, nil
 }
 
-// GetRecentlyChangedFiles returns files changed in the last N commits
+// GetRecentlyChangedFiles returns files changed in the last N commits.
+// Also feeds the internal recentlyChanged map used for cold-start boosting.
 func (a *ProjectAnalyzer) GetRecentlyChangedFiles(rootPath string, commitCount int) ([]ChangedFile, error) {
 	absPath, err := filepath.Abs(rootPath)
 	if err != nil {
@@ -869,7 +953,39 @@ func (a *ProjectAnalyzer) GetRecentlyChangedFiles(rootPath string, commitCount i
 		return nil, nil
 	}
 
-	return a.parseChangedFiles(output), nil
+	files := a.parseChangedFiles(output)
+
+	// Feed the recentlyChanged map (used by cold-start ranking)
+	if a.recentlyChanged == nil {
+		a.recentlyChanged = make(map[string]bool)
+	}
+	for _, f := range files {
+		a.recentlyChanged[filepath.Base(f.Path)] = true
+	}
+
+	return files, nil
+}
+
+// ResetLightIndex clears the light index state (mainly useful for tests)
+func (a *ProjectAnalyzer) ResetLightIndex() {
+	a.lightIndexed = false
+	a.lightIndexedAt = time.Time{}
+	a.recentlyChanged = nil
+}
+
+// IsLightIndexed returns whether a light index has been performed.
+func (a *ProjectAnalyzer) IsLightIndexed() bool {
+	return a.lightIndexed
+}
+
+// LightIndexStats returns basic information about the current light index state.
+func (a *ProjectAnalyzer) LightIndexStats() map[string]interface{} {
+	return map[string]interface{}{
+		"indexed":        a.lightIndexed,
+		"indexedAt":      a.lightIndexedAt,
+		"cacheSize":      len(a.cache),
+		"recentlyChanged": len(a.recentlyChanged),
+	}
 }
 
 func (a *ProjectAnalyzer) runGitCommand(dir string, args ...string) (string, error) {

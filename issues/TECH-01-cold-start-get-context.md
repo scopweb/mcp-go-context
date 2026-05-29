@@ -54,3 +54,15 @@ Hacer que `get-context` sea autosuficiente y util sin warm-up manual.
 ## Definicion de terminado
 
 Un cliente MCP puede invocar `get-context` directamente y obtener una respuesta util en la primera llamada.
+
+## Estado actual (2026)
+
+**Implementado en Fase 0**:
+- Nuevo método `EnsureLightIndex(maxFiles, maxDuration)` con límites duros de tiempo y cantidad de archivos.
+- Priorización fuerte de archivos modificados recientemente vía Git.
+- Ranking mejorado en `findRelevantFiles` con señales de git + recencia.
+- Tests específicos de cold-start y hot-start.
+- Observabilidad vía `IsLightIndexed()` y `LightIndexStats()`.
+- `/api/project-summary` ahora expone el estado del light index.
+
+El cold-start ya es funcional y usable sin requerir `analyze-project` previo.
