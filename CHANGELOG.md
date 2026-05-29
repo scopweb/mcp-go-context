@@ -4,61 +4,34 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Added - Fase 0: Cold-Start Robustness for Context & Memory
+### Fase 0: Cold-Start Robustness
+- Major improvements to `get-context` so it works well even without prior `analyze-project` call (addresses TECH-01).
+- New `EnsureLightIndex()` with time and file count limits + git-aware prioritization.
+- Better relevance scoring using recent git changes.
+- New observability APIs and dedicated cold-start tests.
 
-- **Major improvement to `get-context` cold-start behavior** (addresses TECH-01):
-  - New `EnsureLightIndex(maxFiles, maxDuration)` method performs bounded, git-aware project discovery on first use.
-  - Git-changed files are now prioritized during light indexing and receive strong relevance boosts in `findRelevantFiles`.
-  - `GetRelevantContext` (used by `get-context` tool and `/api/quick-context`) now automatically triggers light indexing when the analyzer cache is cold.
-  - Added exported constants: `DefaultLightIndexMaxFiles`, `DefaultLightIndexMaxDuration`, `LightIndexCooldown`.
-- New observability methods on `ProjectAnalyzer`:
-  - `IsLightIndexed()`
-  - `LightIndexStats()`
-  - `ResetLightIndex()` (mainly for testing)
-- `GetRecentlyChangedFiles` now feeds the internal recently-changed map used for ranking.
-- Dedicated cold-start tests added in `analyzer_test.go`:
-  - `TestEnsureLightIndexPopulatesCache`
-  - `TestEnsureLightIndexRespectsMaxFiles`
-  - `TestResetLightIndex`
-  - `TestLightIndexStats`
-- `/api/project-summary` now includes light index state (`indexed`, `cacheSize`, `recentlyChanged`, etc.) for observability.
-- Updated `AnalyzerInterface` and test fakes to support new methods.
-- Backward-compatible: `quickDiscovery()` now delegates to the new bounded implementation.
+### Fase 1: Intelligent Memory Promotion
+- New tool `suggest-promotions` that analyzes existing memories and recommends the best candidates for long-term storage.
+- Significantly improved promotion heuristic (`SuggestForPromotion`) using decision structure, usage, recency, weighted keywords, and alternatives considered.
+- Clear recommended workflow: `save-decision` → `suggest-promotions` → `promote-memory`.
 
-### Changed
-- Relevance scoring in `findRelevantFiles` strengthened for recently modified and git-changed files.
-- Light indexing is now time- and file-count bounded to keep first `get-context` calls responsive even on large repositories.
-
-### Documentation
-- Progress on TECH-01 (cold-start) and related memory usability improvements.
-
-### Added - Fase 1: Intelligent Promotion Suggestions
-
-- New `SuggestForPromotion(limit)` method in memory manager with transparent heuristic scoring based on:
-  - Structured decisions (`decisionType` + `reason`)
-  - Usage frequency
-  - Recency
-  - Decision-like language in content
-- New MCP tool: `suggest-promotions` — returns the top candidates worth promoting, with ready-to-use `promote-memory` instructions.
-- Tool is registered and available immediately alongside existing memory tools.
-- Updated `MemoryInterface` and test fakes.
-
-### Fase 3 - Dashboard & Promotion Observability
-
-- New `GET /api/suggestions` endpoint that surfaces promotion candidates from the improved heuristic.
-- `POST /api/memories/{key}` now supports promoting a memory directly from the dashboard.
-- Dashboard UI now has a "Suggested for Promotion" section with one-click Promote buttons.
-- Stats bar now shows "Promoted" count.
-- Promoted memories are now tracked and visible in the web interface.
+### Fase 3: Dashboard & Promotion Observability
+- New `GET /api/suggestions` endpoint.
+- Ability to promote memories directly via `POST /api/memories/{key}`.
+- Full "Suggested for Promotion" section in the web dashboard with one-click promote buttons.
+- Promoted count in stats + "Promoted only" filter.
+- Visual badges for promoted memories.
 
 ### Improved
+- **`instructions` field** in the `initialize` response completely rewritten for much better tool discoverability and memory convergence guidance.
+- Build scripts for Windows (`build.bat` and `build-enhanced.bat`) with clean output name `mcp-context-server.exe` in `bin/`.
 
-- **`instructions` field in `initialize` response** (high impact for memory usage):
-  - Now lists all 12 tools with clear descriptions.
-  - Prominently documents the Memory Convergence model and recommended workflow:
-    `save-decision` → `suggest-promotions` → `promote-memory`
-  - Strongly guides models on when and how to use persistent memory tools.
-  - This is one of the highest-leverage changes for making LLMs actually use the memory features effectively.
+### Documentation
+- Major overhaul of the entire documentation site (`website/`).
+- New guides: **Buenas Prácticas de Memoria** and **Dashboard y API HTTP**.
+- Significantly improved **Flujo de Memoria** guide with real practical examples.
+- Updated README with modern workflow and Windows build instructions.
+- All phases (0, 1, 3) and new tools properly documented.
 
 ## [1.2.0] - 2026-05-20
 

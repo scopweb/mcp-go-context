@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scopweb/mcp-go-context/internal/analyzer"
 	"github.com/scopweb/mcp-go-context/internal/config"
 	"github.com/scopweb/mcp-go-context/internal/memory"
 )
@@ -21,12 +22,22 @@ func newTestHandler(t *testing.T) *Handler {
 		MaxResults:     100,
 		SessionTTLDays: 30,
 		MaxSessions:    10,
-	})
+	}, "testproj")
 	if err != nil {
 		t.Fatalf("memory.New() failed: %v", err)
 	}
 
-	handler, err := New(mgr)
+	cfg := config.ContextConfig{
+		ProjectPaths:    []string{"."},
+		IgnorePatterns:  []string{"*.log", "*.tmp"},
+		AutoDetectDeps:  false,
+	}
+	analyzr, err := analyzer.New(cfg)
+	if err != nil {
+		t.Fatalf("analyzer.New() failed: %v", err)
+	}
+
+	handler, err := New(mgr, analyzr)
 	if err != nil {
 		t.Fatalf("New() failed: %v", err)
 	}

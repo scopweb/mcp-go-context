@@ -450,7 +450,7 @@ var pageTemplate = template.Must(template.New("memory-dashboard").Parse(`<!DOCTY
 
       const data = await response.json();
       renderStats(data.stats || {});
-      renderDecisionTypes(data.stats?.decisionTypes || []);
+      renderDecisionTypes((data.stats && data.stats.decisionTypes) || []);
       renderProjects(data.projects || [], data.activeProject || '');
       renderMemories(data.items || []);
     }
@@ -616,57 +616,61 @@ var pageTemplate = template.Must(template.New("memory-dashboard").Parse(`<!DOCTY
     function renderSuggestions(items) {
       if (!suggestionsContainer) return;
 
-      // Header with refresh button
-      const header = `
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
-          <span style="font-weight:600; color:var(--text);">Top candidates for long-term memory</span>
-          <button id="refresh-suggestions" style="font-size:0.75rem; padding:4px 10px; background:transparent; color:var(--accent); border:1px solid var(--accent);">↻ Refresh</button>
-        </div>
-      `;
+      var header = '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">' +
+        '<span style="font-weight:600; color:var(--text);">Top candidates for long-term memory</span>' +
+        '<button id="refresh-suggestions" style="font-size:0.75rem; padding:4px 10px; background:transparent; color:var(--accent); border:1px solid var(--accent);">Refresh</button>' +
+        '</div>';
 
       if (!items.length) {
-        suggestionsContainer.innerHTML = header + '<div class="empty">No strong promotion candidates right now. Great job keeping memory clean!</div>';
-        document.getElementById('refresh-suggestions')?.addEventListener('click', loadSuggestions);
+        suggestionsContainer.innerHTML = header + '<div class="empty">No strong promotion candidates right now.</div>';
+        var refreshBtn = document.getElementById('refresh-suggestions');
+        if (refreshBtn) refreshBtn.addEventListener('click', loadSuggestions);
         return;
       }
 
-      suggestionsContainer.innerHTML = header + items.map(item => {
-        const badge = item.decisionType ? '<span class="badge">' + escapeHtml(item.decisionType) + '</span>' : '';
-        const usage = item.usage ? `<span style="font-size:0.75rem;color:var(--muted);">Used ${item.usage}×</span>` : '';
-        const reasonPreview = item.reason ? `<div style="font-size:0.8rem; color:#555; margin-top:4px;"><strong>Reason:</strong> ${escapeHtml(item.reason.slice(0,120))}${item.reason.length > 120 ? '...' : ''}</div>` : '';
+      var html = header;
+      for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        var badge = item.decisionType ? '<span class="badge">' + escapeHtml(item.decisionType) + '</span>' : '';
+        var usageText = item.usage ? 'Used ' + item.usage + 'x' : '';
+        var usage = usageText ? '<span style="font-size:0.75rem;color:var(--muted);">' + usageText + '</span>' : '';
+        var reasonText = '';
+        if (item.reason) {
+          var shortReason = escapeHtml(item.reason.slice(0,120));
+          if (item.reason.length > 120) shortReason += '...';
+          reasonText = '<div style="font-size:0.8rem; color:#555; margin-top:4px;"><strong>Reason:</strong> ' + shortReason + '</div>';
+        }
 
-        return '' +
-          '<article class="memory-card" style="border-left: 4px solid var(--accent);">' +
-            '<div class="memory-head">' +
-              '<h2 class="memory-key" style="font-size:1rem;">' + escapeHtml(item.key) + '</h2>' +
-              badge +
-            '</div>' +
-            '<p class="memory-content" style="font-size:0.85rem; line-height:1.4;">' + escapeHtml((item.content || '').slice(0, 160)) + '...</p>' +
-            reasonPreview +
-            '<div style="margin-top:6px;">' + usage + '</div>' +
-            '<div class="memory-actions">' +
-              '<button type="button" class="promote-btn" data-key="' + encodeURIComponent(item.key) + '" style="background:var(--accent);color:white;border:none;padding:6px 14px;border-radius:6px;font-size:0.8rem;">Promote</button>' +
-            '</div>' +
+        html += '<article class="memory-card" style="border-left: 4px solid var(--accent);">' +
+          '<div class="memory-head">' +
+            '<h2 class="memory-key" style="font-size:1rem;">' + escapeHtml(item.key) + '</h2>' + badge +
+          '</div>' +
+          '<p class="memory-content" style="font-size:0.85rem; line-height:1.4;">' + escapeHtml((item.content || '').slice(0, 160)) + '...</p>' +
+          reasonText +
+          '<div style="margin-top:6px;">' + usage + '</div>' +
+          '<div class="memory-actions">' +
+            '<button type="button" class="promote-btn" data-key="' + encodeURIComponent(item.key) + '" style="background:var(--accent);color:white;border:none;padding:6px 14px;border-radius:6px;font-size:0.8rem;">Promote</button>' +
+          '</div>' +
           '</article>';
-      }).join('');
+      }
+      suggestionsContainer.innerHTML = html;
 
-      // Refresh button
-      document.getElementById('refresh-suggestions')?.addEventListener('click', loadSuggestions);
+      var refreshBtn2 = document.getElementById('refresh-suggestions');
+      if (refreshBtn2) refreshBtn2.addEventListener('click', loadSuggestions);
 
-      // Promote buttons
-      suggestionsContainer.querySelectorAll('.promote-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
-          const key = decodeURIComponent(btn.dataset.key);
+      suggestionsContainer.querySelectorAll('.promote-btn').forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+          var key = decodeURIComponent(btn.dataset.key);
           if (!confirm('Promote "' + key + '" to long-term persistent memory?')) return;
 
           btn.textContent = 'Promoting...';
           btn.disabled = true;
 
-          const res = await fetch('/api/memories/' + encodeURIComponent(key), { method: 'POST' });
+          var res = await fetch('/api/memories/' + encodeURIComponent(key), { method: 'POST' });
           if (res.ok) {
-            btn.textContent = '✓ Promoted';
+            btn.textContent = 'Promoted!';
             btn.style.background = '#28a745';
-            setTimeout(() => {
+            setTimeout(function() {
               loadSuggestions();
               loadMemories();
             }, 900);

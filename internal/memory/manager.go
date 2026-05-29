@@ -1140,17 +1140,3 @@ func (m *Manager) SuggestForPromotion(limit int) ([]*Memory, error) {
 
 	return result, nil
 }
-
-	// Sort by score descending
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].score > candidates[j].score
-	})
-
-	// Return top N
-	result := make([]*Memory, 0, limit)
-	for i := 0; i < len(candidates) && i < limit; i++ {
-		result = append(result, candidates[i].mem)
-	}
-
-	return result, nil
-}

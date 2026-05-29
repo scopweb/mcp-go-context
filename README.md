@@ -31,14 +31,25 @@ For session summarization and compaction, use SessionMemory (Claude Code's built
 
 ## Quick Start
 
-1. Build the binary:
+### 1. Build the binary
+
+**Windows (recommended):**
+```bat
+git clone https://github.com/scopweb/mcp-go-context
+cd mcp-go-context
+build.bat
+```
+
+This will generate `bin\mcp-context-server.exe` (the file you configure in Claude Desktop).
+
+**Linux / macOS:**
 ```bash
 git clone https://github.com/scopweb/mcp-go-context
 cd mcp-go-context
 go build -o bin/mcp-context-server ./cmd/mcp-context-server
 ```
 
-2. Configure Claude Desktop (Windows example):
+### 2. Configure Claude Desktop (Windows example):
 ```json
 {
   "mcpServers": {
@@ -224,16 +235,31 @@ Default config (no file needed):
 - The server is stateless - all memory persists to disk.
 - HTTP API provides lightweight enrichment without MCP overhead.
 
+## Documentation
+
+The project includes a full documentation site:
+
+- **[Documentation Website](https://github.com/scopweb/mcp-go-context/tree/main/website)** (built with Astro + Starlight)
+- [CHANGELOG](CHANGELOG.md)
+
+**Recommended guides:**
+- **Buenas Prácticas de Memoria** — How to use the memory system effectively
+- **Flujo de Memoria** — Current recommended workflow using `suggest-promotions`
+- **Dashboard y API HTTP** — How to use the web interface
+
 ## Development
 
 ```bash
 # Run tests
 go test ./...
 
-# Build
+# Build (Linux/macOS)
 go build -o bin/mcp-context-server ./cmd/mcp-context-server
 
-# Run with HTTP transport
+# Build (Windows - recommended)
+build.bat
+
+# Run with HTTP transport (for dashboard)
 make run-http
 ```
 

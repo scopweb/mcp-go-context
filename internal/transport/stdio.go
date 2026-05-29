@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 )
 
 // StdioTransport implements MCP over stdio with proper JSON-RPC protocol
+// Supports both HTTP-style headers (Claude Desktop) and simple LDJ mode
 type StdioTransport struct {
 	reader *bufio.Reader
 	writer io.Writer
@@ -64,9 +66,28 @@ func (t *StdioTransport) Start(ctx context.Context, info ServerInfo, handler Req
 }
 
 // readMessage reads a JSON-RPC message from stdin
-// MCP stdio uses newline-delimited JSON messages (one JSON object per line)
+// Supports both HTTP-style headers (Claude Desktop) and simple LDJ mode
 func (t *StdioTransport) readMessage() (json.RawMessage, error) {
-	// Read a line (message) from stdin
+	// First, peek to see if we have HTTP headers or direct JSON
+	peek, err := t.reader.Peek(1)
+	if err != nil {
+		if err == io.EOF {
+			return nil, err
+		}
+		return nil, fmt.Errorf("failed to peek: %w", err)
+	}
+
+	// Check if it starts with '{' (direct JSON - LDJ mode)
+	if peek[0] == '{' {
+		return t.readLDJMessage()
+	}
+
+	// Otherwise, try HTTP-style with Content-Length headers
+	return t.readHTTPMessage()
+}
+
+// readLDJMessage reads a simple newline-delimited JSON message
+func (t *StdioTransport) readLDJMessage() (json.RawMessage, error) {
 	line, err := t.reader.ReadString('\n')
 	if err != nil {
 		if err == io.EOF {
@@ -79,7 +100,7 @@ func (t *StdioTransport) readMessage() (json.RawMessage, error) {
 	line = strings.TrimSuffix(strings.TrimSuffix(line, "\r"), "\n")
 	line = strings.TrimSpace(line)
 
-	// Skip empty lines (common at startup)
+	// Skip empty lines
 	if line == "" {
 		return nil, fmt.Errorf("empty line received")
 	}
@@ -93,8 +114,63 @@ func (t *StdioTransport) readMessage() (json.RawMessage, error) {
 	return json.RawMessage(line), nil
 }
 
+// readHTTPMessage reads HTTP-style message with Content-Length header
+func (t *StdioTransport) readHTTPMessage() (json.RawMessage, error) {
+	headers := make(map[string]string)
+
+	// Read headers
+	for {
+		line, err := t.reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				return nil, err
+			}
+			return nil, fmt.Errorf("failed to read header: %w", err)
+		}
+
+		// Trim CRLF and newline
+		line = strings.TrimSuffix(strings.TrimSuffix(line, "\r"), "\n")
+
+		// Empty line marks end of headers
+		if line == "" {
+			break
+		}
+
+		// Parse header: "Header-Name: value"
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) == 2 {
+			headers[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		}
+	}
+
+	// Get Content-Length
+	contentLengthStr, ok := headers["Content-Length"]
+	if !ok {
+		return nil, fmt.Errorf("missing Content-Length header")
+	}
+
+	contentLength, err := strconv.Atoi(contentLengthStr)
+	if err != nil || contentLength <= 0 {
+		return nil, fmt.Errorf("invalid Content-Length: %s", contentLengthStr)
+	}
+
+	// Read content
+	content := make([]byte, contentLength)
+	if _, err := io.ReadFull(t.reader, content); err != nil {
+		return nil, fmt.Errorf("failed to read content: %w", err)
+	}
+
+	// Validate JSON
+	var temp interface{}
+	if err := json.Unmarshal(content, &temp); err != nil {
+		return nil, fmt.Errorf("invalid JSON content: %w", err)
+	}
+
+	return json.RawMessage(content), nil
+}
+
 // sendMessage sends a JSON-RPC message to stdout
-// MCP stdio: messages are newline-delimited JSON, no headers
+// Uses LDJ mode (newline-delimited JSON) which is the MCP stdio standard
 func (t *StdioTransport) sendMessage(msg json.RawMessage) error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
@@ -113,9 +189,11 @@ func (t *StdioTransport) sendMessage(msg json.RawMessage) error {
 		return err
 	}
 
-	// Ensure output is flushed
-	if flusher, ok := t.writer.(interface{ Flush() error }); ok {
-		return flusher.Flush()
+	// Ensure output is flushed immediately
+	if f, ok := t.writer.(interface{ Flush() error }); ok {
+		if err := f.Flush(); err != nil {
+			return err
+		}
 	}
 
 	return nil

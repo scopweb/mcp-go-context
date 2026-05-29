@@ -13,14 +13,18 @@ rem Create bin directory
 if not exist bin mkdir bin
 
 rem Build for current platform
-echo 📦 Building for current platform...
+echo 📦 Building for current platform (dashboard is embedded)...
+echo    Note: The web dashboard (HTML+JS) is compiled directly into the binary.
+echo    No separate frontend build step is needed.
 go build -ldflags "%LDFLAGS%" -o bin/mcp-context-server.exe ./cmd/mcp-context-server
 
 if %ERRORLEVEL% equ 0 (
     echo ✅ Build successful!
-    echo 📍 Binary: bin/mcp-context-server.exe
+    echo 📍 Binary: bin\mcp-context-server.exe   (este es el .exe que utilizas)
     echo 🔖 Version: %VERSION%
     echo 🔧 Commit: %COMMIT%
+    echo.
+    echo    Este .exe es el que configuras en Claude Desktop / tu cliente MCP.
     
     rem Test basic functionality
     echo.

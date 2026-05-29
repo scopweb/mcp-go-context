@@ -1,8 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -109,11 +111,13 @@ func TestLoadWithInvalidStoragePath(t *testing.T) {
 		t.Fatalf("failed to write temp file: %v", err)
 	}
 
-	configContent := `{
+	// Escape backslashes for JSON string (Windows paths contain \U which is unicode escape)
+	escapedPath := strings.ReplaceAll(filePath, "\\", "\\\\")
+	configContent := fmt.Sprintf(`{
 		"memory": {
-			"storagePath": "` + filePath + `"
+			"storagePath": "%s"
 		}
-	}`
+	}`, escapedPath)
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
 		t.Fatalf("failed to write temp config: %v", err)
 	}
