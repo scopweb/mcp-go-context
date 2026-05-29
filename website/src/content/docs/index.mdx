@@ -1,0 +1,69 @@
+---
+title: MCP Go Context Server
+description: Servidor MCP para contexto técnico local y memoria operativa persistente en proyectos de código.
+template: splash
+hero:
+  tagline: Contexto técnico local + memoria de decisiones que realmente sobrevive entre sesiones.
+  image:
+    file: ../../assets/scopweb.png
+    alt: Logo de MCP Go Context Server
+  actions:
+    - text: Empezar ahora
+      link: /guides/introduction/
+      icon: right-arrow
+    - text: Ver herramientas
+      link: /reference/tools/
+      icon: open-book
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Qué ofrece
+
+Este servidor MCP está diseñado para que los asistentes de código tengan **contexto técnico real** del proyecto y una **memoria operativa** que persiste entre sesiones.
+
+<CardGrid stagger>
+	<Card title="Arranque en frío" icon="rocket">
+		`get-context` funciona bien incluso sin haber ejecutado `analyze-project` antes gracias al indexado ligero automático.
+	</Card>
+	<Card title="Memoria inteligente" icon="pencil">
+		La herramienta `suggest-promotions` analiza tus memorias y te recomienda qué merece ser promovido a largo plazo.
+	</Card>
+	<Card title="Dashboard web" icon="setting">
+		Interfaz visual para explorar memorias, ver sugerencias de promoción y promover con un clic.
+	</Card>
+	<Card title="Convergencia real" icon="open-book">
+		Funciona junto a SessionMemory de Claude Code. Tú decides qué pasa de sesión temporal a memoria persistente.
+	</Card>
+</CardGrid>
+
+## Para quién es
+
+**Ideal si:**
+- Trabajas en proyectos medianos/grandes y necesitas recordar decisiones técnicas semanas después.
+- Quieres que las convenciones y fixes importantes no se pierdan al final de cada sesión.
+- Usas Claude Desktop/Code y quieres enriquecer su contexto con información real de tu codebase.
+- Necesitas exponer contexto de proyecto vía HTTP a otras herramientas.
+
+**No es para:**
+- Resúmenes automáticos de sesión (eso ya lo hace SessionMemory).
+- Búsqueda semántica general de código.
+- Reemplazar completamente la memoria de tu asistente.
+
+## Flujo recomendado de memoria
+
+1. Durante el trabajo → `save-decision` cuando tomas decisiones importantes.
+2. Al final de sesión compleja → `suggest-promotions` para descubrir qué vale la pena guardar.
+3. Promueves lo importante → `promote-memory`.
+4. Sesiones futuras → `get-context` y `search-memory` ya traen ese conocimiento.
+
+## Transporte y compatibilidad
+
+| Uso                        | Transporte     | Recomendado |
+|---------------------------|----------------|-------------|
+| Claude Desktop / Code     | stdio          | Sí          |
+| Dashboard + API HTTP      | http o sse     | Sí          |
+| Herramientas externas     | http           | Sí          |
+
+Compatible con Go 1.26.2+ y MCP Specification 2025-11-25.
