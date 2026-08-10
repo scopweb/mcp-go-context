@@ -450,6 +450,83 @@ func TestLightIndexStats(t *testing.T) {
 	}
 }
 
+func TestLightIndexRevalidatesChangedFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	goFile := filepath.Join(tmpDir, "main.go")
+	if err := writeFile(goFile, "package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println() }\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &ProjectAnalyzer{
+		config: config.ContextConfig{ProjectPaths: []string{tmpDir}},
+		cache:  make(map[string]*FileInfo),
+	}
+	a.EnsureLightIndex(100, 5*time.Second)
+
+	cached := a.cache[goFile]
+	if cached == nil || len(cached.Imports) != 1 || cached.Imports[0] != "fmt" {
+		t.Fatalf("expected initial import [fmt], got %+v", cached)
+	}
+
+	// Modify the file with a guaranteed-different mtime
+	if err := writeFile(goFile, "package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\nfunc main() { fmt.Println(os.Args) }\n"); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(2 * time.Hour)
+	if err := os.Chtimes(goFile, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	// Force re-index (bypass cooldown)
+	a.lightIndexedAt = time.Now().Add(-10 * time.Minute)
+	a.EnsureLightIndex(100, 5*time.Second)
+
+	updated := a.cache[goFile]
+	if updated == nil || len(updated.Imports) != 2 {
+		t.Fatalf("expected refreshed imports [fmt os], got %+v", updated)
+	}
+}
+
+func TestManifestChangeResetsLightIndex(t *testing.T) {
+	tmpDir := t.TempDir()
+	goMod := filepath.Join(tmpDir, "go.mod")
+	if err := writeFile(goMod, "module example.com/x\n\ngo 1.21\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFile(filepath.Join(tmpDir, "main.go"), "package main\n\nfunc main() {}\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &ProjectAnalyzer{
+		config: config.ContextConfig{ProjectPaths: []string{tmpDir}},
+		cache:  make(map[string]*FileInfo),
+	}
+	a.EnsureLightIndex(100, 5*time.Second)
+
+	if !a.IsLightIndexed() {
+		t.Fatal("expected light index after first run")
+	}
+	if len(a.manifestMtimes) == 0 {
+		t.Fatal("expected manifest mtimes to be tracked")
+	}
+
+	// Touch go.mod with a guaranteed-different mtime; cooldown is still fresh,
+	// so only the manifest watcher can trigger a re-index.
+	past := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(goMod, past, past); err != nil {
+		t.Fatal(err)
+	}
+	before := a.lightIndexedAt
+	a.EnsureLightIndex(100, 5*time.Second)
+
+	if !a.lightIndexedAt.After(before) {
+		t.Error("expected manifest change to force re-index despite cooldown")
+	}
+	if a.manifestMtimes[goMod] != past.Unix() {
+		t.Errorf("expected manifest mtime updated to %d, got %d", past.Unix(), a.manifestMtimes[goMod])
+	}
+}
+
 // Helper function to write files
 func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0644)

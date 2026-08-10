@@ -37,6 +37,7 @@ type MemoryInterface interface {
 	Store(string, string, []string) error
 	StoreWithType(string, string, []string, string, string, []string) error
 	Retrieve(string) (*memory.Memory, error)
+	Get(string) (*memory.Memory, error)
 	Search(string, []string) ([]*memory.Memory, error)
 	SearchWithProject(string, []string, string) ([]*memory.Memory, error)
 	ActiveProject() string
@@ -299,7 +300,11 @@ func RememberConversationHandler(args json.RawMessage, server interface{}) (inte
 		return createErrorResponse(fmt.Sprintf("Failed to store memory: %v", err))
 	}
 
-	return textResponse(fmt.Sprintf("Stored memory '%s' with tags: %v", params.Key, params.Tags)), nil
+	response := fmt.Sprintf("Stored memory '%s' with tags: %v", params.Key, params.Tags)
+	if saved, getErr := memory.Get(params.Key); getErr == nil && saved != nil && len(saved.Related) > 0 {
+		response += fmt.Sprintf("\nLinked to: %v", saved.Related)
+	}
+	return textResponse(response), nil
 }
 
 // DependencyAnalysisHandler - Complete dependency analysis
@@ -921,7 +926,11 @@ func SaveDecisionHandler(args json.RawMessage, server interface{}) (interface{},
 		return createErrorResponse(fmt.Sprintf("Failed to save decision: %v", err))
 	}
 
-	return textResponse(fmt.Sprintf("Decision saved successfully:\n- Key: %s\n- Type: %s\n- Tags: %v", params.Key, params.DecisionType, params.Tags)), nil
+	response := fmt.Sprintf("Decision saved successfully:\n- Key: %s\n- Type: %s\n- Tags: %v", params.Key, params.DecisionType, params.Tags)
+	if saved, getErr := memory.Get(params.Key); getErr == nil && saved != nil && len(saved.Related) > 0 {
+		response += fmt.Sprintf("\n- Linked to: %v", saved.Related)
+	}
+	return textResponse(response), nil
 }
 
 // GetDecisionsHandler - Retrieves decisions with optional filtering
@@ -1207,6 +1216,9 @@ func formatSearchResults(items []*memory.Memory) string {
 		result.WriteString(fmt.Sprintf("## %s\n", item.Key))
 		result.WriteString(fmt.Sprintf("**Tags**: %v\n", item.Tags))
 		result.WriteString(fmt.Sprintf("**Usage**: %d times\n", item.Usage))
+		if len(item.Related) > 0 {
+			result.WriteString(fmt.Sprintf("**Related**: %v\n", item.Related))
+		}
 		result.WriteString(fmt.Sprintf("**Content**:\n%s\n\n", item.Content))
 	}
 

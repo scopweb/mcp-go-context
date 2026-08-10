@@ -50,7 +50,13 @@ type Memory struct {
 	DecisionType string   `json:"decisionType,omitempty"` // architecture, fix, approach, etc.
 	Reason       string   `json:"reason,omitempty"`       // why this decision was made
 	Alternatives []string `json:"alternatives,omitempty"` // what else was considered
+	// Related holds keys of auto-linked memories (shared tags + word overlap).
+	// Links are bidirectional: storing A linked to B also adds A to B.Related.
+	Related []string `json:"related,omitempty"`
 }
+
+// maxRelatedMemories caps auto-linked relations per memory.
+const maxRelatedMemories = 5
 
 // UnassignedProject is the placeholder label for memories with empty Project.
 const UnassignedProject = "unassigned"
@@ -218,10 +224,17 @@ func (m *Manager) StoreWithType(key, content string, tags []string, decisionType
 		Reason:       reason,
 		Alternatives: alternatives,
 	}
+	// Auto-link before indexing so the new memory never matches itself
+	mem.Related = m.findRelated(mem)
 	session.Memories[key] = mem
 
 	// Update indexes
 	m.addToIndexes(key, mem)
+
+	// Backlink: make relations navigable in both directions
+	for _, relKey := range mem.Related {
+		m.addBacklink(relKey, key)
+	}
 
 	// Save to disk
 	return m.saveSession(session)
@@ -571,6 +584,7 @@ func (m *Manager) Delete(key string) error {
 
 		m.removeFromIndexes(key, memory)
 		delete(session.Memories, key)
+		m.removeKeyFromRelated(key)
 		return m.saveSession(session)
 	}
 
@@ -692,6 +706,7 @@ func (m *Manager) cleanup() {
 			// Remove from indexes
 			for key, memory := range session.Memories {
 				m.removeFromIndexes(key, memory)
+				m.removeKeyFromRelated(key)
 			}
 			delete(m.sessions, id)
 			os.Remove(filepath.Join(m.config.StoragePath, id+".json"))
@@ -713,6 +728,7 @@ func (m *Manager) cleanup() {
 			id := sessions[i].ID
 			for key, memory := range sessions[i].Memories {
 				m.removeFromIndexes(key, memory)
+				m.removeKeyFromRelated(key)
 			}
 			delete(m.sessions, id)
 			os.Remove(filepath.Join(m.config.StoragePath, id+".json"))
@@ -740,6 +756,109 @@ func (m *Manager) evictLowScored(session *Session) {
 	if lowestKey != "" {
 		m.removeFromIndexes(lowestKey, session.Memories[lowestKey])
 		delete(session.Memories, lowestKey)
+		m.removeKeyFromRelated(lowestKey)
+	}
+}
+
+// findRelated returns up to maxRelatedMemories keys of memories related to
+// mem: candidates must share at least one tag, ranked by shared tags
+// (weight 10) plus content word overlap. Active project only; never self.
+// Must be called with m.mu held and before mem itself is indexed.
+func (m *Manager) findRelated(mem Memory) []string {
+	scores := make(map[string]int)
+	sharedTags := make(map[string]int)
+
+	for _, tag := range mem.Tags {
+		for key := range m.tagIndex[strings.ToLower(tag)] {
+			if key == mem.Key {
+				continue
+			}
+			sharedTags[key]++
+			scores[key] += 10
+		}
+	}
+	if len(sharedTags) == 0 {
+		return nil
+	}
+
+	for _, word := range tokenize(strings.ToLower(mem.Content)) {
+		for key := range m.wordIndex[word] {
+			if key != mem.Key && sharedTags[key] > 0 {
+				scores[key]++
+			}
+		}
+	}
+
+	type rel struct {
+		key   string
+		score int
+	}
+	var ranked []rel
+	for key, score := range scores {
+		target := m.findMemory(key)
+		if target == nil || !m.matchesProject(target, "") {
+			continue
+		}
+		ranked = append(ranked, rel{key, score})
+	}
+	sort.Slice(ranked, func(i, j int) bool {
+		if ranked[i].score != ranked[j].score {
+			return ranked[i].score > ranked[j].score
+		}
+		return ranked[i].key < ranked[j].key
+	})
+	if len(ranked) > maxRelatedMemories {
+		ranked = ranked[:maxRelatedMemories]
+	}
+
+	keys := make([]string, 0, len(ranked))
+	for _, r := range ranked {
+		keys = append(keys, r.key)
+	}
+	return keys
+}
+
+// addBacklink appends fromKey to the Related list of toKey (if not already
+// present), keeping the list capped. Must be called with m.mu held.
+func (m *Manager) addBacklink(toKey, fromKey string) {
+	for _, session := range m.sessions {
+		target, exists := session.Memories[toKey]
+		if !exists {
+			continue
+		}
+		for _, r := range target.Related {
+			if r == fromKey {
+				return
+			}
+		}
+		target.Related = append(target.Related, fromKey)
+		if len(target.Related) > maxRelatedMemories {
+			target.Related = target.Related[len(target.Related)-maxRelatedMemories:]
+		}
+		session.Memories[toKey] = target
+		return
+	}
+}
+
+// removeKeyFromRelated deletes dangling links to key from every memory.
+// Must be called with m.mu held.
+func (m *Manager) removeKeyFromRelated(key string) {
+	for _, session := range m.sessions {
+		for k, mem := range session.Memories {
+			if len(mem.Related) == 0 {
+				continue
+			}
+			filtered := make([]string, 0, len(mem.Related))
+			for _, r := range mem.Related {
+				if r != key {
+					filtered = append(filtered, r)
+				}
+			}
+			if len(filtered) != len(mem.Related) {
+				mem.Related = filtered
+				session.Memories[k] = mem
+			}
+		}
 	}
 }
 

@@ -33,7 +33,8 @@ type ProjectAnalyzer struct {
 	// Light index state for cold-start optimization (Fase 0)
 	lightIndexed    bool
 	lightIndexedAt  time.Time
-	recentlyChanged map[string]bool // basenames of files changed in recent git commits
+	recentlyChanged map[string]bool  // basenames of files changed in recent git commits
+	manifestMtimes  map[string]int64 // known dependency manifests -> last seen mtime
 }
 
 // FileInfo contains information about a file
@@ -283,6 +284,12 @@ func (a *ProjectAnalyzer) EnsureLightIndex(maxFiles int, maxDuration time.Durati
 		maxDuration = 1500 * time.Millisecond
 	}
 
+	// A changed dependency manifest invalidates the light index immediately
+	// (imports/dependency ranking may shift even inside the cooldown window).
+	if a.manifestsChanged() {
+		a.ResetLightIndex()
+	}
+
 	// Avoid re-indexing too frequently
 	if a.lightIndexed && time.Since(a.lightIndexedAt) < LightIndexCooldown {
 		return
@@ -347,9 +354,12 @@ func (a *ProjectAnalyzer) EnsureLightIndex(maxFiles int, maxDuration time.Durati
 				return nil
 			}
 
-			// Skip if we already indexed this file (e.g. from git phase)
-			if _, exists := a.cache[path]; exists {
-				return nil
+			// Skip only files whose cached entry is still fresh (mtime unchanged);
+			// changed files are re-analyzed so imports/language never go stale.
+			if existing, exists := a.cache[path]; exists {
+				if stat, statErr := os.Stat(path); statErr == nil && stat.ModTime().Unix() == existing.LastModified {
+					return nil
+				}
 			}
 
 			info, err := a.analyzeFile(path)
@@ -361,8 +371,40 @@ func (a *ProjectAnalyzer) EnsureLightIndex(maxFiles int, maxDuration time.Durati
 		})
 	}
 
+	a.refreshManifestMtimes()
 	a.lightIndexed = true
 	a.lightIndexedAt = time.Now()
+}
+
+// manifestsChanged reports whether any known dependency manifest changed
+// (or disappeared) since the last light index.
+func (a *ProjectAnalyzer) manifestsChanged() bool {
+	for path, mtime := range a.manifestMtimes {
+		stat, err := os.Stat(path)
+		if err != nil || stat.ModTime().Unix() != mtime {
+			return true
+		}
+	}
+	return false
+}
+
+// refreshManifestMtimes records the mtimes of all discovered dependency
+// manifests so later EnsureLightIndex calls can cheaply detect changes.
+func (a *ProjectAnalyzer) refreshManifestMtimes() {
+	if a.manifestMtimes == nil {
+		a.manifestMtimes = make(map[string]int64)
+	}
+	for _, projectPath := range a.config.ProjectPaths {
+		absPath, err := filepath.Abs(projectPath)
+		if err != nil {
+			continue
+		}
+		for _, m := range a.findManifests(absPath) {
+			if stat, err := os.Stat(m.path); err == nil {
+				a.manifestMtimes[m.path] = stat.ModTime().Unix()
+			}
+		}
+	}
 }
 
 // quickDiscovery kept for backward compatibility (delegates to EnsureLightIndex)

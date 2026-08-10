@@ -921,3 +921,105 @@ func TestMemoryStatsEmpty(t *testing.T) {
 		t.Error("expected zero oldest timestamp with no memories")
 	}
 }
+
+func TestMemoryAutoLinkSharedTags(t *testing.T) {
+	cfg := config.MemoryConfig{
+		Enabled:        true,
+		StoragePath:    t.TempDir(),
+		MaxEntries:     100,
+		MaxResults:     10,
+		SessionTTLDays: 30,
+	}
+
+	m, err := New(cfg, "testproj")
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+
+	m.Store("auth-decision", "We use JWT for auth tokens", []string{"auth", "security"})
+	m.Store("auth-fix", "Fixed token refresh race in auth middleware", []string{"auth", "fix"})
+	m.Store("unrelated", "Dashboard uses plain CSS", []string{"dashboard"})
+
+	fix, err := m.Get("auth-fix")
+	if err != nil {
+		t.Fatalf("Get() failed: %v", err)
+	}
+	if !containsKey(fix.Related, "auth-decision") {
+		t.Errorf("expected auth-fix linked to auth-decision, got %v", fix.Related)
+	}
+	if containsKey(fix.Related, "unrelated") {
+		t.Errorf("unrelated memory must not be linked, got %v", fix.Related)
+	}
+	if containsKey(fix.Related, "auth-fix") {
+		t.Error("memory must never link to itself")
+	}
+
+	// Backlink: the older memory should now reference the newer one
+	decision, err := m.Get("auth-decision")
+	if err != nil {
+		t.Fatalf("Get() failed: %v", err)
+	}
+	if !containsKey(decision.Related, "auth-fix") {
+		t.Errorf("expected backlink from auth-decision to auth-fix, got %v", decision.Related)
+	}
+}
+
+func TestMemoryAutoLinkRespectsCap(t *testing.T) {
+	cfg := config.MemoryConfig{
+		Enabled:        true,
+		StoragePath:    t.TempDir(),
+		MaxEntries:     100,
+		MaxResults:     10,
+		SessionTTLDays: 30,
+	}
+
+	m, err := New(cfg, "testproj")
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+
+	for i := 0; i < 8; i++ {
+		m.Store(fmt.Sprintf("item-%d", i), fmt.Sprintf("content %d", i), []string{"shared"})
+	}
+
+	last, err := m.Get("item-7")
+	if err != nil {
+		t.Fatalf("Get() failed: %v", err)
+	}
+	if len(last.Related) > maxRelatedMemories {
+		t.Errorf("expected at most %d related, got %d", maxRelatedMemories, len(last.Related))
+	}
+	if len(last.Related) == 0 {
+		t.Error("expected some related memories with a shared tag")
+	}
+}
+
+func TestMemoryDeleteCleansRelated(t *testing.T) {
+	cfg := config.MemoryConfig{
+		Enabled:        true,
+		StoragePath:    t.TempDir(),
+		MaxEntries:     100,
+		MaxResults:     10,
+		SessionTTLDays: 30,
+	}
+
+	m, err := New(cfg, "testproj")
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+
+	m.Store("keep", "stays around", []string{"topic"})
+	m.Store("drop", "will be deleted", []string{"topic"})
+
+	if err := m.Delete("drop"); err != nil {
+		t.Fatalf("Delete() failed: %v", err)
+	}
+
+	keep, err := m.Get("keep")
+	if err != nil {
+		t.Fatalf("Get() failed: %v", err)
+	}
+	if containsKey(keep.Related, "drop") {
+		t.Errorf("deleted key must be removed from Related, got %v", keep.Related)
+	}
+}

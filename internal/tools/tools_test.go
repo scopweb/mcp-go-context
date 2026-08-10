@@ -73,6 +73,8 @@ func (f fakeMemory) StoreWithType(string, string, []string, string, string, []st
 
 func (f fakeMemory) Retrieve(string) (*memory.Memory, error) { return nil, nil }
 
+func (f fakeMemory) Get(string) (*memory.Memory, error) { return nil, nil }
+
 func (f fakeMemory) Search(string, []string) ([]*memory.Memory, error) {
 	return f.results, nil
 }

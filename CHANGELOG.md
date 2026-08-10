@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- New tool `memory-stats`: aggregate memory statistics (sessions, memories, promoted, decisions, usage hits, storage bytes, limits).
+- `fetch-docs` accepts optional `libraryId` to skip the Context7 resolve step, plus `query` as alias for `topic` (closes TECH-02).
+- `dependency-analysis` now tags every dependency with a scope (`root`, `package`, `app`, `service`, `module`) discovered via a bounded manifest walk (nested `apps/`, `services/`, etc.), and groups output by scope (closes TECH-03).
+- Memories auto-link to each other (`related` field): storing a memory links it to up to 5 memories with shared tags (ranked by tag + word overlap), with bidirectional backlinks. `remember-conversation`, `save-decision` and `search-memory` surface the links. Deletes and evictions clean up dangling links.
+- Light index self-healing: cached files are re-analyzed when their mtime changes, and any dependency manifest change (`go.mod`, `package.json`, `pyproject.toml`, `requirements.txt`) forces re-indexing even inside the cooldown window.
+
+### Fixed
+- `internal/memory` test build (duplicate `contains` helper).
+- `InferProject` returned `"c"` for `C:\` on non-Windows hosts (`filepath.ToSlash` is a no-op there).
+
 ### Fase 0: Cold-Start Robustness
 - Major improvements to `get-context` so it works well even without prior `analyze-project` call (addresses TECH-01).
 - New `EnsureLightIndex()` with time and file count limits + git-aware prioritization.
