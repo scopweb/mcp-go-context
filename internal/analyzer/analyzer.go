@@ -3,6 +3,7 @@ package analyzer
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/parser"
 	"go/token"
@@ -30,9 +31,9 @@ type ProjectAnalyzer struct {
 	cache  map[string]*FileInfo
 
 	// Light index state for cold-start optimization (Fase 0)
-	lightIndexed     bool
-	lightIndexedAt   time.Time
-	recentlyChanged  map[string]bool // basenames of files changed in recent git commits
+	lightIndexed    bool
+	lightIndexedAt  time.Time
+	recentlyChanged map[string]bool // basenames of files changed in recent git commits
 }
 
 // FileInfo contains information about a file
@@ -72,14 +73,15 @@ type Dependency struct {
 	Version string
 	Type    string // direct, indirect
 	Path    string
+	Scope   string // root, module, package, app, service
 }
 
 // ChangedFile represents a file changed in git
 type ChangedFile struct {
-	Path     string
-	Status   string // added, modified, deleted, renamed
-	OldPath  string // for renamed files
-	Lines    int
+	Path           string
+	Status         string // added, modified, deleted, renamed
+	OldPath        string // for renamed files
+	Lines          int
 	SelfAuthorship bool // committed by the author themselves
 }
 
@@ -379,86 +381,121 @@ func (a *ProjectAnalyzer) AnalyzeDependencies(includeTransitive bool) ([]Depende
 			continue
 		}
 
-		// Check for go.mod
-		goModPath := filepath.Join(absPath, "go.mod")
-		if _, err := os.Stat(goModPath); err == nil {
-			goDeps, err := a.parseGoMod(goModPath, includeTransitive)
-			if err == nil {
-				deps = append(deps, goDeps...)
+		for _, m := range a.findManifests(absPath) {
+			var parsed []Dependency
+			var err error
+			switch m.kind {
+			case "go":
+				parsed, err = a.parseGoMod(m.path, includeTransitive)
+			case "node":
+				parsed, err = a.parsePackageJSON(m.path, includeTransitive)
+			case "pyproject":
+				parsed, err = a.parsePyproject(m.path, includeTransitive)
+			case "requirements":
+				parsed, err = a.parseRequirements(m.path, includeTransitive)
 			}
-		}
-
-		// Check for package.json (Node.js)
-		pkgPath := filepath.Join(absPath, "package.json")
-		if _, err := os.Stat(pkgPath); err == nil {
-			pkgDeps, err := a.parsePackageJSON(pkgPath, includeTransitive)
-			if err == nil {
-				deps = append(deps, pkgDeps...)
+			if err != nil {
+				continue
 			}
-		}
-
-		// Check for pyproject.toml (Python)
-		pyprojectPath := filepath.Join(absPath, "pyproject.toml")
-		if _, err := os.Stat(pyprojectPath); err == nil {
-			pyDeps, err := a.parsePyproject(pyprojectPath, includeTransitive)
-			if err == nil {
-				deps = append(deps, pyDeps...)
+			for i := range parsed {
+				parsed[i].Scope = m.scope
+				parsed[i].Path = m.path
 			}
-		}
-
-		// Check for requirements.txt (Python)
-		requirementsPath := filepath.Join(absPath, "requirements.txt")
-		if _, err := os.Stat(requirementsPath); err == nil {
-			reqDeps, err := a.parseRequirements(requirementsPath, includeTransitive)
-			if err == nil {
-				deps = append(deps, reqDeps...)
-			}
-		}
-
-		// Check for pnpm-workspace.yaml (pnpm monorepo)
-		pnpmWorkspacePath := filepath.Join(absPath, "pnpm-workspace.yaml")
-		if _, err := os.Stat(pnpmWorkspacePath); err == nil {
-			// Find all packages in the monorepo
-			monorepoDeps := a.findMonorepoPackages(absPath, includeTransitive)
-			deps = append(deps, monorepoDeps...)
+			deps = append(deps, parsed...)
 		}
 	}
 
 	return deps, nil
 }
 
-// findMonorepoPackages finds packages in a pnpm monorepo
-func (a *ProjectAnalyzer) findMonorepoPackages(rootPath string, includeTransitive bool) []Dependency {
-	var deps []Dependency
-	packagesDir := filepath.Join(rootPath, "packages")
+// manifestRef is a dependency manifest found during the bounded walk
+type manifestRef struct {
+	path  string
+	kind  string // go, node, pyproject, requirements
+	scope string
+}
 
-	info, err := os.Stat(packagesDir)
-	if err != nil || !info.IsDir() {
-		return deps
-	}
+// manifestDepthLimit and manifestCountLimit bound the manifest walk so
+// dependency analysis stays cheap on large trees.
+const (
+	manifestDepthLimit = 4
+	manifestCountLimit = 50
+)
 
-	entries, err := os.ReadDir(packagesDir)
-	if err != nil {
-		return deps
-	}
+// findManifests walks root looking for dependency manifests (go.mod,
+// package.json, pyproject.toml, requirements.txt), respecting IgnorePatterns
+// and bounded by manifestDepthLimit/manifestCountLimit.
+func (a *ProjectAnalyzer) findManifests(root string) []manifestRef {
+	var manifests []manifestRef
+	stop := errors.New("manifest limit reached")
 
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
 		}
-		pkgPath := filepath.Join(packagesDir, entry.Name(), "package.json")
-		if _, err := os.Stat(pkgPath); err == nil {
-			pkgDeps, err := a.parsePackageJSON(pkgPath, includeTransitive)
-			if err == nil {
-				for i := range pkgDeps {
-					pkgDeps[i].Path = pkgPath // Mark with full path
-				}
-				deps = append(deps, pkgDeps...)
+		if len(manifests) >= manifestCountLimit {
+			return stop
+		}
+		if a.shouldIgnore(path) {
+			if d.IsDir() {
+				return fs.SkipDir
 			}
+			return nil
 		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if rel != "." && len(strings.Split(rel, string(filepath.Separator))) > manifestDepthLimit {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		kind := ""
+		switch d.Name() {
+		case "go.mod":
+			kind = "go"
+		case "package.json":
+			kind = "node"
+		case "pyproject.toml":
+			kind = "pyproject"
+		case "requirements.txt":
+			kind = "requirements"
+		default:
+			return nil
+		}
+		manifests = append(manifests, manifestRef{
+			path:  path,
+			kind:  kind,
+			scope: scopeForDir(filepath.Dir(rel)),
+		})
+		return nil
+	})
+	if err != nil && !errors.Is(err, stop) {
+		return manifests
 	}
 
-	return deps
+	return manifests
+}
+
+// scopeForDir derives a dependency scope from the manifest directory
+// relative to the project root: root, package, app, service or module.
+func scopeForDir(relDir string) string {
+	if relDir == "." || relDir == "" {
+		return "root"
+	}
+	first := strings.Split(filepath.ToSlash(relDir), "/")[0]
+	switch first {
+	case "packages", "pkg":
+		return "package"
+	case "apps":
+		return "app"
+	case "services":
+		return "service"
+	default:
+		return "module"
+	}
 }
 
 // parseGoMod parses go.mod file for dependencies
@@ -981,9 +1018,9 @@ func (a *ProjectAnalyzer) IsLightIndexed() bool {
 // LightIndexStats returns basic information about the current light index state.
 func (a *ProjectAnalyzer) LightIndexStats() map[string]interface{} {
 	return map[string]interface{}{
-		"indexed":        a.lightIndexed,
-		"indexedAt":      a.lightIndexedAt,
-		"cacheSize":      len(a.cache),
+		"indexed":         a.lightIndexed,
+		"indexedAt":       a.lightIndexedAt,
+		"cacheSize":       len(a.cache),
 		"recentlyChanged": len(a.recentlyChanged),
 	}
 }

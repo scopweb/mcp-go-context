@@ -132,6 +132,7 @@ curl "http://localhost:3000/api/quick-context?query=database+migrations&maxToken
 | `suggest-promotions` | Analyzes memories and recommends which ones to promote to long-term storage |
 | `promote-memory` | Mark a memory as high-value for persistent storage |
 | `get-promoted-memories` | List only the high-value promoted memories |
+| `memory-stats` | Aggregate memory statistics (counts, usage hits, storage size, limits) |
 
 ## HTTP REST API
 

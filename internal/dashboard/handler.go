@@ -943,8 +943,8 @@ func (h *Handler) handleProjectSummary(w http.ResponseWriter, r *http.Request) {
 
 	// Build a concise summary (not the full structure)
 	summary := map[string]any{
-		"rootPath":      structure.RootPath,
-		"totalFiles":    0,
+		"rootPath":       structure.RootPath,
+		"totalFiles":     0,
 		"languages":      map[string]int{},
 		"topDirectories": []string{},
 		"stats": map[string]any{
@@ -1011,8 +1011,8 @@ func (h *Handler) handleQuickContext(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"query":    query,
-		"context":  context,
+		"query":     query,
+		"context":   context,
 		"truncated": len(context) > maxTokens*4, // rough token estimate
 	})
 }

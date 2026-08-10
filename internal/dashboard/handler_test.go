@@ -28,9 +28,9 @@ func newTestHandler(t *testing.T) *Handler {
 	}
 
 	cfg := config.ContextConfig{
-		ProjectPaths:    []string{"."},
-		IgnorePatterns:  []string{"*.log", "*.tmp"},
-		AutoDetectDeps:  false,
+		ProjectPaths:   []string{"."},
+		IgnorePatterns: []string{"*.log", "*.tmp"},
+		AutoDetectDeps: false,
 	}
 	analyzr, err := analyzer.New(cfg)
 	if err != nil {

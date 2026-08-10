@@ -97,6 +97,8 @@ func (f fakeMemory) Demote(string) error { return nil }
 
 func (f fakeMemory) SuggestForPromotion(int) ([]*memory.Memory, error) { return nil, nil }
 
+func (f fakeMemory) Stats() memory.Stats { return memory.Stats{ActiveProject: "test"} }
+
 func TestAnalyzeProjectHandlerUsesConcreteTypes(t *testing.T) {
 	server := fakeServer{
 		analyzer: fakeAnalyzer{

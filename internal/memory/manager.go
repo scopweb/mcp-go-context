@@ -69,7 +69,7 @@ func InferProject(cwd string) string {
 	if cwd == "" {
 		return "default"
 	}
-	clean := strings.TrimRight(filepath.ToSlash(cwd), "/")
+	clean := strings.TrimRight(strings.ReplaceAll(cwd, "\\", "/"), "/")
 	segs := strings.Split(clean, "/")
 	last := ""
 	for i := len(segs) - 1; i >= 0; i-- {
@@ -274,6 +274,68 @@ func (m *Manager) Get(key string) (*Memory, error) {
 // ActiveProject returns the project slug this manager is scoped to.
 func (m *Manager) ActiveProject() string {
 	return m.activeProject
+}
+
+// Stats summarizes memory usage across all sessions and on-disk storage,
+// inspired by memcached's stats command.
+type Stats struct {
+	ActiveProject  string    `json:"activeProject"`
+	Sessions       int       `json:"sessions"`
+	Memories       int       `json:"memories"`
+	Promoted       int       `json:"promoted"`
+	Decisions      int       `json:"decisions"`
+	TotalUsage     int       `json:"totalUsage"`   // sum of per-memory usage counters (read hits)
+	StorageBytes   int64     `json:"storageBytes"` // size of persisted session files
+	OldestMemoryAt time.Time `json:"oldestMemoryAt,omitempty"`
+	NewestMemoryAt time.Time `json:"newestMemoryAt,omitempty"`
+	MaxEntries     int       `json:"maxEntries"`
+	SessionTTLDays int       `json:"sessionTTLDays"`
+}
+
+// Stats returns aggregate memory statistics across every loaded session
+// plus the size of persisted storage.
+func (m *Manager) Stats() Stats {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	stats := Stats{
+		ActiveProject:  m.activeProject,
+		Sessions:       len(m.sessions),
+		MaxEntries:     m.config.MaxEntries,
+		SessionTTLDays: m.config.SessionTTLDays,
+	}
+
+	for _, session := range m.sessions {
+		for _, mem := range session.Memories {
+			stats.Memories++
+			stats.TotalUsage += mem.Usage
+			if mem.Promoted {
+				stats.Promoted++
+			}
+			if mem.DecisionType != "" {
+				stats.Decisions++
+			}
+			if stats.OldestMemoryAt.IsZero() || mem.Timestamp.Before(stats.OldestMemoryAt) {
+				stats.OldestMemoryAt = mem.Timestamp
+			}
+			if mem.Timestamp.After(stats.NewestMemoryAt) {
+				stats.NewestMemoryAt = mem.Timestamp
+			}
+		}
+	}
+
+	if entries, err := os.ReadDir(m.config.StoragePath); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+				continue
+			}
+			if info, err := entry.Info(); err == nil {
+				stats.StorageBytes += info.Size()
+			}
+		}
+	}
+
+	return stats
 }
 
 // matchesProject reports whether mem belongs to the requested project filter.

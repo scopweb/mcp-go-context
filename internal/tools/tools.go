@@ -46,6 +46,7 @@ type MemoryInterface interface {
 	Promote(string, string) error
 	Demote(string) error
 	SuggestForPromotion(int) ([]*memory.Memory, error) // Fase 1: intelligent promotion suggestions
+	Stats() memory.Stats
 }
 
 type ConfigInterface interface {
@@ -228,14 +229,20 @@ func GetContextHandler(args json.RawMessage, server interface{}) (interface{}, e
 // FetchDocsHandler - Context7-like API integration
 func FetchDocsHandler(args json.RawMessage, server interface{}) (interface{}, error) {
 	var params struct {
-		Library string `json:"library"`
-		Version string `json:"version"`
-		Topic   string `json:"topic"`
-		Tokens  int    `json:"tokens"`
+		Library   string `json:"library"`
+		Version   string `json:"version"`
+		Topic     string `json:"topic"`
+		Query     string `json:"query"`
+		LibraryID string `json:"libraryId"`
+		Tokens    int    `json:"tokens"`
 	}
 
 	if err := json.Unmarshal(args, &params); err != nil {
 		return nil, fmt.Errorf("invalid parameters: %w", err)
+	}
+
+	if params.Topic == "" {
+		params.Topic = params.Query
 	}
 
 	if params.Tokens == 0 {
@@ -243,7 +250,7 @@ func FetchDocsHandler(args json.RawMessage, server interface{}) (interface{}, er
 	}
 
 	// Try Context7 API first
-	docs, err := fetchFromContext7(params.Library, params.Version, params.Topic, params.Tokens)
+	docs, err := fetchFromContext7(params.Library, params.LibraryID, params.Version, params.Topic, params.Tokens)
 	if err == nil && docs != "" {
 		return textResponse(docs), nil
 	}
@@ -337,15 +344,26 @@ func DependencyAnalysisHandler(args json.RawMessage, server interface{}) (interf
 		}
 	}
 
-	// Direct dependencies
+	// Direct dependencies, grouped by scope so monorepo origins stay unambiguous
 	result.WriteString(fmt.Sprintf("## Direct Dependencies (%d)\n\n", len(directDeps)))
-	for _, dep := range directDeps {
-		result.WriteString(fmt.Sprintf("- **%s** `%s`", dep.Name, dep.Version))
-		if params.SuggestDocs {
-			docSuggestion := suggestDocumentation(dep.Name)
-			if docSuggestion != "" {
-				result.WriteString(fmt.Sprintf(" - [Docs](%s)", docSuggestion))
+	directByScope := groupDepsByScope(directDeps)
+	for _, scope := range sortedScopes(directByScope) {
+		scopeDeps := directByScope[scope]
+		if len(directByScope) > 1 {
+			result.WriteString(fmt.Sprintf("### Scope: %s (%d)\n\n", scope, len(scopeDeps)))
+		}
+		for _, dep := range scopeDeps {
+			result.WriteString(fmt.Sprintf("- **%s** `%s`", dep.Name, dep.Version))
+			if len(directByScope) > 1 {
+				result.WriteString(fmt.Sprintf(" _(from %s)_", filepath.Base(dep.Path)))
 			}
+			if params.SuggestDocs {
+				docSuggestion := suggestDocumentation(dep.Name)
+				if docSuggestion != "" {
+					result.WriteString(fmt.Sprintf(" - [Docs](%s)", docSuggestion))
+				}
+			}
+			result.WriteString("\n")
 		}
 		result.WriteString("\n")
 	}
@@ -356,7 +374,7 @@ func DependencyAnalysisHandler(args json.RawMessage, server interface{}) (interf
 		// Show only first 20 to avoid clutter
 		displayCount := min(20, len(indirectDeps))
 		for i, dep := range indirectDeps[:displayCount] {
-			result.WriteString(fmt.Sprintf("%d. %s `%s`\n", i+1, dep.Name, dep.Version))
+			result.WriteString(fmt.Sprintf("%d. %s `%s` (%s)\n", i+1, dep.Name, dep.Version, dep.Scope))
 		}
 		if len(indirectDeps) > 20 {
 			result.WriteString(fmt.Sprintf("\n... and %d more indirect dependencies\n", len(indirectDeps)-20))
@@ -374,6 +392,35 @@ func DependencyAnalysisHandler(args json.RawMessage, server interface{}) (interf
 }
 
 // Helper functions
+
+func groupDepsByScope(deps []analyzer.Dependency) map[string][]analyzer.Dependency {
+	byScope := make(map[string][]analyzer.Dependency)
+	for _, dep := range deps {
+		scope := dep.Scope
+		if scope == "" {
+			scope = "root"
+		}
+		byScope[scope] = append(byScope[scope], dep)
+	}
+	return byScope
+}
+
+func sortedScopes(byScope map[string][]analyzer.Dependency) []string {
+	scopes := make([]string, 0, len(byScope))
+	for scope := range byScope {
+		scopes = append(scopes, scope)
+	}
+	sort.Slice(scopes, func(i, j int) bool {
+		if scopes[i] == "root" {
+			return true
+		}
+		if scopes[j] == "root" {
+			return false
+		}
+		return scopes[i] < scopes[j]
+	})
+	return scopes
+}
 
 func createErrorResponse(message string) ([]map[string]interface{}, error) {
 	return textResponse(fmt.Sprintf("Error: %s", message)), nil
@@ -430,48 +477,51 @@ func analyzeQuery(query string) string {
 	return ""
 }
 
-func fetchFromContext7(library, version, topic string, tokens int) (string, error) {
+func fetchFromContext7(library, libraryID, version, topic string, tokens int) (string, error) {
 	// FASE 2 FIX: Context7 uses libraryId-based flow, not direct library names
-	// Step 1: Resolve libraryId from library name + query
-	resolveURL := "https://context7.com/api/v1/library/resolve"
-	resolveBody := fmt.Sprintf(`{"library": "%s", "query": "%s"}`, library, topic)
-	req, err := http.NewRequest("POST", resolveURL, strings.NewReader(resolveBody))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Context7-Source", "mcp-server-go")
+	// Step 1: Resolve libraryId from library name + query (skipped if caller provides one)
+	if libraryID == "" {
+		resolveURL := "https://context7.com/api/v1/library/resolve"
+		resolveBody := fmt.Sprintf(`{"library": "%s", "query": "%s"}`, library, topic)
+		req, err := http.NewRequest("POST", resolveURL, strings.NewReader(resolveBody))
+		if err != nil {
+			return "", err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Context7-Source", "mcp-server-go")
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("library resolve returned status %d", resp.StatusCode)
-	}
+		if resp.StatusCode != http.StatusOK {
+			return "", fmt.Errorf("library resolve returned status %d", resp.StatusCode)
+		}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return "", err
+		}
 
-	// Parse libraryId from response
-	var resolveResp struct {
-		LibraryID string `json:"libraryId"`
-	}
-	if err := json.Unmarshal(body, &resolveResp); err != nil {
-		return "", fmt.Errorf("failed to parse library response: %w", err)
-	}
+		// Parse libraryId from response
+		var resolveResp struct {
+			LibraryID string `json:"libraryId"`
+		}
+		if err := json.Unmarshal(body, &resolveResp); err != nil {
+			return "", fmt.Errorf("failed to parse library response: %w", err)
+		}
 
-	if resolveResp.LibraryID == "" {
-		return "", fmt.Errorf("no libraryId resolved for %s", library)
+		if resolveResp.LibraryID == "" {
+			return "", fmt.Errorf("no libraryId resolved for %s", library)
+		}
+		libraryID = resolveResp.LibraryID
 	}
 
 	// Step 2: Fetch docs using libraryId
-	docsURL := fmt.Sprintf("https://context7.com/api/v1/library/%s/docs", resolveResp.LibraryID)
+	docsURL := fmt.Sprintf("https://context7.com/api/v1/library/%s/docs", libraryID)
 	docsReq, err := http.NewRequest("GET", docsURL, nil)
 	if err != nil {
 		return "", err
@@ -487,6 +537,7 @@ func fetchFromContext7(library, version, topic string, tokens int) (string, erro
 
 	docsReq.Header.Set("X-Context7-Source", "mcp-server-go")
 
+	client := &http.Client{Timeout: 30 * time.Second}
 	docsResp, err := client.Do(docsReq)
 	if err != nil {
 		return "", err
@@ -935,7 +986,7 @@ func GetDecisionsHandler(args json.RawMessage, server interface{}) (interface{},
 // PromoteMemoryHandler - Marks a memory as promoted (high-value, from session convergence)
 func PromoteMemoryHandler(args json.RawMessage, server interface{}) (interface{}, error) {
 	var params struct {
-		Key       string `json:"key"`       // memory key to promote
+		Key        string `json:"key"`        // memory key to promote
 		Confidence string `json:"confidence"` // "low", "medium", "high"
 	}
 
@@ -1089,6 +1140,49 @@ func SuggestPromotionsHandler(args json.RawMessage, server interface{}) (interfa
 	result.WriteString("\nAfter promoting, these memories will be returned by `get-promoted-memories` and will have higher priority in future context retrieval.\n")
 
 	return textResponse(result.String()), nil
+}
+
+// MemoryStatsHandler - aggregate memory statistics (memcached-style stats)
+func MemoryStatsHandler(args json.RawMessage, server interface{}) (interface{}, error) {
+	srv, ok := server.(ServerInterface)
+	if !ok {
+		return createErrorResponse("Server interface error")
+	}
+
+	mem := srv.GetMemory()
+	if mem == nil {
+		return createErrorResponse("Memory manager not available")
+	}
+
+	stats := mem.Stats()
+
+	var result strings.Builder
+	result.WriteString("# Memory Stats\n\n")
+	result.WriteString(fmt.Sprintf("- **Project**: %s\n", stats.ActiveProject))
+	result.WriteString(fmt.Sprintf("- **Sessions**: %d\n", stats.Sessions))
+	result.WriteString(fmt.Sprintf("- **Memories**: %d (max %d)\n", stats.Memories, stats.MaxEntries))
+	result.WriteString(fmt.Sprintf("- **Promoted**: %d\n", stats.Promoted))
+	result.WriteString(fmt.Sprintf("- **Decisions**: %d\n", stats.Decisions))
+	result.WriteString(fmt.Sprintf("- **Total usage (read hits)**: %d\n", stats.TotalUsage))
+	result.WriteString(fmt.Sprintf("- **Storage size**: %s\n", formatBytes(stats.StorageBytes)))
+	result.WriteString(fmt.Sprintf("- **Session TTL**: %d days\n", stats.SessionTTLDays))
+	if !stats.OldestMemoryAt.IsZero() {
+		result.WriteString(fmt.Sprintf("- **Oldest memory**: %s\n", stats.OldestMemoryAt.Format("2006-01-02")))
+		result.WriteString(fmt.Sprintf("- **Newest memory**: %s\n", stats.NewestMemoryAt.Format("2006-01-02")))
+	}
+
+	return textResponse(result.String()), nil
+}
+
+func formatBytes(b int64) string {
+	switch {
+	case b >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(b)/float64(1<<20))
+	case b >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(b)/float64(1<<10))
+	default:
+		return fmt.Sprintf("%d B", b)
+	}
 }
 
 // truncate truncates a string to maxLen characters

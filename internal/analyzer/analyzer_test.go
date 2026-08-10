@@ -3,6 +3,7 @@ package analyzer
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -308,7 +309,7 @@ func TestFindRelevantFiles(t *testing.T) {
 	}
 	a := &ProjectAnalyzer{
 		config: cfg,
-		cache: make(map[string]*FileInfo),
+		cache:  make(map[string]*FileInfo),
 	}
 
 	// Add some files to cache
@@ -342,7 +343,7 @@ func TestFindRelevantFilesWithScore(t *testing.T) {
 	cfg := config.ContextConfig{}
 	a := &ProjectAnalyzer{
 		config: cfg,
-		cache: make(map[string]*FileInfo),
+		cache:  make(map[string]*FileInfo),
 	}
 
 	a.cache["/test/gin-server.go"] = &FileInfo{
@@ -452,4 +453,72 @@ func TestLightIndexStats(t *testing.T) {
 // Helper function to write files
 func writeFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0644)
+}
+
+func TestAnalyzeDependenciesMixedMonorepo(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Root Go module
+	if err := writeFile(filepath.Join(tmpDir, "go.mod"), "module example.com/root\n\ngo 1.21\n\nrequire github.com/spf13/cobra v1.8.0\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Nested app with package.json
+	webDir := filepath.Join(tmpDir, "apps", "web")
+	if err := os.MkdirAll(webDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFile(filepath.Join(webDir, "package.json"), `{"name":"web","dependencies":{"react":"^18.0.0"}}`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Nested service with requirements.txt
+	apiDir := filepath.Join(tmpDir, "services", "api")
+	if err := os.MkdirAll(apiDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFile(filepath.Join(apiDir, "requirements.txt"), "flask==3.0.0\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Ignored directory must not be scanned
+	nmDir := filepath.Join(tmpDir, "node_modules", "leftpad")
+	if err := os.MkdirAll(nmDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFile(filepath.Join(nmDir, "package.json"), `{"name":"leftpad","dependencies":{"x":"1.0.0"}}`); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.ContextConfig{
+		ProjectPaths:   []string{tmpDir},
+		IgnorePatterns: []string{"node_modules", ".git"},
+	}
+	a, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+
+	deps, err := a.AnalyzeDependencies(false)
+	if err != nil {
+		t.Fatalf("AnalyzeDependencies() failed: %v", err)
+	}
+
+	scopeByName := make(map[string]string)
+	for _, dep := range deps {
+		scopeByName[dep.Name] = dep.Scope
+	}
+
+	if scopeByName["github.com/spf13/cobra"] != "root" {
+		t.Errorf("expected cobra scope=root, got %q", scopeByName["github.com/spf13/cobra"])
+	}
+	if scopeByName["react"] != "app" {
+		t.Errorf("expected react scope=app, got %q", scopeByName["react"])
+	}
+	if scopeByName["flask"] != "service" {
+		t.Errorf("expected flask scope=service, got %q", scopeByName["flask"])
+	}
+	if _, found := scopeByName["x"]; found {
+		t.Error("dependencies under node_modules must be ignored")
+	}
 }

@@ -770,7 +770,7 @@ func TestMemorySuggestForPromotion(t *testing.T) {
 
 	// The two strong ones should be present
 	keys := keysOf(suggestions)
-	if !contains(keys, "arch-decision") && !contains(keys, "fix-leak") {
+	if !containsKey(keys, "arch-decision") && !containsKey(keys, "fix-leak") {
 		t.Errorf("expected strong decisions in suggestions, got %v", keys)
 	}
 
@@ -847,11 +847,77 @@ func TestMemorySuggestForPromotionEmpty(t *testing.T) {
 	}
 }
 
-func contains(slice []string, item string) bool {
+func containsKey(slice []string, item string) bool {
 	for _, s := range slice {
 		if s == item {
 			return true
 		}
 	}
 	return false
+}
+
+func TestMemoryStats(t *testing.T) {
+	cfg := config.MemoryConfig{
+		Enabled:        true,
+		StoragePath:    t.TempDir(),
+		MaxEntries:     100,
+		MaxResults:     10,
+		SessionTTLDays: 30,
+	}
+
+	m, err := New(cfg, "testproj")
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+
+	m.StoreWithType("arch-decision", "We chose stdlib only", []string{"decision"}, "architecture", "No deps policy", nil)
+	m.Store("plain-note", "remember to update the dashboard", []string{"note"})
+	m.Promote("arch-decision", "high")
+	m.Retrieve("plain-note")
+	m.Retrieve("plain-note")
+
+	stats := m.Stats()
+
+	if stats.ActiveProject != "testproj" {
+		t.Errorf("expected ActiveProject=testproj, got %q", stats.ActiveProject)
+	}
+	if stats.Memories != 2 {
+		t.Errorf("expected 2 memories, got %d", stats.Memories)
+	}
+	if stats.Promoted != 1 {
+		t.Errorf("expected 1 promoted, got %d", stats.Promoted)
+	}
+	if stats.Decisions != 1 {
+		t.Errorf("expected 1 decision, got %d", stats.Decisions)
+	}
+	if stats.TotalUsage != 2 {
+		t.Errorf("expected TotalUsage=2, got %d", stats.TotalUsage)
+	}
+	if stats.MaxEntries != 100 || stats.SessionTTLDays != 30 {
+		t.Errorf("expected limits echoed in stats, got %+v", stats)
+	}
+	if stats.OldestMemoryAt.IsZero() || stats.NewestMemoryAt.IsZero() {
+		t.Error("expected oldest/newest timestamps to be set")
+	}
+}
+
+func TestMemoryStatsEmpty(t *testing.T) {
+	cfg := config.MemoryConfig{
+		Enabled:     true,
+		StoragePath: t.TempDir(),
+		MaxEntries:  100,
+	}
+
+	m, err := New(cfg, "testproj")
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+
+	stats := m.Stats()
+	if stats.Memories != 0 || stats.Promoted != 0 || stats.TotalUsage != 0 {
+		t.Errorf("expected empty stats, got %+v", stats)
+	}
+	if !stats.OldestMemoryAt.IsZero() {
+		t.Error("expected zero oldest timestamp with no memories")
+	}
 }

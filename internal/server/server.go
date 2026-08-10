@@ -336,6 +336,14 @@ func (s *Server) registerTools() {
 					"type":        "string",
 					"description": "Specific topic within the docs",
 				},
+				"query": map[string]interface{}{
+					"type":        "string",
+					"description": "Alias for topic: free-text hint used when resolving the library",
+				},
+				"libraryId": map[string]interface{}{
+					"type":        "string",
+					"description": "Context7 library ID (e.g. /org/project). Skips the resolve step when provided",
+				},
 			},
 			"required": []string{"library"},
 		},
@@ -563,5 +571,16 @@ func (s *Server) registerTools() {
 			},
 		},
 		Handler: tools.SuggestPromotionsHandler,
+	})
+
+	// memory-stats tool - aggregate memory statistics (memcached-style)
+	s.tools.Register(&tools.Tool{
+		Name:        "memory-stats",
+		Description: "Returns aggregate memory statistics: session and memory counts, promoted/decision totals, total usage (read hits), on-disk storage size, and configured limits. Useful for checking memory hygiene before running suggest-promotions.",
+		InputSchema: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		},
+		Handler: tools.MemoryStatsHandler,
 	})
 }

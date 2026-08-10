@@ -1,6 +1,6 @@
 ---
 name: mcp-go-context
-description: "MCP context server for local project analysis, conversation memory, and documentation lookup. Tools: analyze-project, get-context, fetch-docs, dependency-analysis, changed-files-context, remember-conversation, save-decision, get-decisions, search-memory, suggest-promotions, promote-memory, get-promoted-memories."
+description: "MCP context server for local project analysis, conversation memory, and documentation lookup. Tools: analyze-project, get-context, fetch-docs, dependency-analysis, changed-files-context, remember-conversation, save-decision, get-decisions, search-memory, suggest-promotions, promote-memory, get-promoted-memories, memory-stats."
 ---
 
 # mcp-go-context
@@ -88,6 +88,9 @@ Advanced search through conversation memory with ranking by relevance, recency, 
 ### suggest-promotions
 Analyzes existing memories using multiple quality signals and returns the best candidates worth promoting to long-term storage.
 - `limit` (optional): Maximum suggestions (default: 5)
+
+### memory-stats
+Returns aggregate memory statistics (memcached-style): session/memory counts, promoted and decision totals, total usage (read hits), on-disk storage size, and configured limits. No parameters.
 
 ## Memory Convergence Model
 
