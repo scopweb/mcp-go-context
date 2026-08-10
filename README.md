@@ -11,8 +11,8 @@ The project is intended for editor and assistant workflows where it is useful to
 ## What It Does
 
 - Analyzes project structure, dependencies, and multi-ecosystem workspaces (Go, Node.js, Python)
-- Stores persistent memory between sessions (decisions, fixes, conventions)
-- `get-context` works well even on cold start thanks to bounded git-aware discovery
+- Stores persistent memory between sessions (decisions, fixes, conventions) with automatic linking between related memories
+- `get-context` works well even on cold start thanks to bounded git-aware discovery with a self-healing index (mtime + manifest aware)
 - `suggest-promotions` helps discover high-value memories worth keeping long-term
 - Fetches documentation via Context7 with local fallbacks
 - Exposes MCP tools over `stdio`, `http`, or `sse`
@@ -122,13 +122,13 @@ curl "http://localhost:3000/api/quick-context?query=database+migrations&maxToken
 |------|---------|
 | `analyze-project` | Full project structure, dependencies, key files |
 | `get-context` | Query-specific context from project + memory (works well even on cold start) |
-| `dependency-analysis` | All dependencies with recommendations |
+| `dependency-analysis` | All dependencies with scope grouping (root/package/app/service/module) and recommendations; finds nested manifests in monorepos |
 | `changed-files-context` | Context from recent git commits |
-| `fetch-docs` | Documentation via Context7 with local fallback |
-| `remember-conversation` | Store any memory with tags |
+| `fetch-docs` | Documentation via Context7 (optional `libraryId` skips resolution) with local fallback |
+| `remember-conversation` | Store any memory with tags (auto-links to related memories) |
 | `save-decision` | Record a technical decision with type, reason and alternatives |
 | `get-decisions` | Search decisions by type or keyword |
-| `search-memory` | Full-text + ranked search across memories |
+| `search-memory` | Full-text + ranked search across memories (shows related memories) |
 | `suggest-promotions` | Analyzes memories and recommends which ones to promote to long-term storage |
 | `promote-memory` | Mark a memory as high-value for persistent storage |
 | `get-promoted-memories` | List only the high-value promoted memories |
