@@ -211,7 +211,12 @@ func GetContextHandler(args json.RawMessage, server interface{}) (interface{}, e
 
 	// Get file context
 	if analyzer != nil {
-		fileContext, err := analyzer.GetRelevantContext(params.Query, params.Files, params.MaxTokens-len(context.String()))
+		usedTokens := len(context.String()) / 4
+		remaining := params.MaxTokens - usedTokens
+		if remaining < 0 {
+			remaining = 0
+		}
+		fileContext, err := analyzer.GetRelevantContext(params.Query, params.Files, remaining)
 		if err == nil {
 			context.WriteString(fileContext)
 		}
@@ -274,6 +279,8 @@ func RememberConversationHandler(args json.RawMessage, server interface{}) (inte
 		Key     string   `json:"key"`
 		Content string   `json:"content"`
 		Tags    []string `json:"tags"`
+		Path    string   `json:"path"`
+		Project string   `json:"project"`
 	}
 
 	if err := json.Unmarshal(args, &params); err != nil {
@@ -295,7 +302,7 @@ func RememberConversationHandler(args json.RawMessage, server interface{}) (inte
 		params.Tags = generateTags(params.Content)
 	}
 
-	err := memory.Store(params.Key, params.Content, params.Tags)
+	err := storeMemory(server, memory, params.Path, params.Project, params.Key, params.Content, params.Tags, "", "", nil)
 	if err != nil {
 		return createErrorResponse(fmt.Sprintf("Failed to store memory: %v", err))
 	}
@@ -891,6 +898,8 @@ func SaveDecisionHandler(args json.RawMessage, server interface{}) (interface{},
 		Reason       string   `json:"reason"`       // why this decision was made
 		Alternatives []string `json:"alternatives"` // what else was considered
 		Tags         []string `json:"tags"`
+		Path         string   `json:"path"`
+		Project      string   `json:"project"`
 	}
 
 	if err := json.Unmarshal(args, &params); err != nil {
@@ -921,7 +930,7 @@ func SaveDecisionHandler(args json.RawMessage, server interface{}) (interface{},
 		return createErrorResponse("Memory manager not available")
 	}
 
-	err := memory.StoreWithType(params.Key, params.Content, params.Tags, params.DecisionType, params.Reason, params.Alternatives)
+	err := storeMemory(server, memory, params.Path, params.Project, params.Key, params.Content, params.Tags, params.DecisionType, params.Reason, params.Alternatives)
 	if err != nil {
 		return createErrorResponse(fmt.Sprintf("Failed to save decision: %v", err))
 	}
@@ -938,6 +947,7 @@ func GetDecisionsHandler(args json.RawMessage, server interface{}) (interface{},
 	var params struct {
 		DecisionType string `json:"decisionType"`
 		Keyword      string `json:"keyword"`
+		Project      string `json:"project"`
 		Limit        int    `json:"limit"`
 	}
 
@@ -954,12 +964,20 @@ func GetDecisionsHandler(args json.RawMessage, server interface{}) (interface{},
 		return createErrorResponse("Server interface error")
 	}
 
-	memory := srv.GetMemory()
-	if memory == nil {
+	memStore := srv.GetMemory()
+	if memStore == nil {
 		return createErrorResponse("Memory manager not available")
 	}
 
-	results, err := memory.SearchDecisions(params.DecisionType, params.Keyword, params.Limit)
+	var results []*memory.Memory
+	var err error
+	if scoped, ok := memStore.(interface {
+		SearchDecisionsScoped(string, string, string, int) ([]*memory.Memory, error)
+	}); ok {
+		results, err = scoped.SearchDecisionsScoped(params.DecisionType, params.Keyword, params.Project, params.Limit)
+	} else {
+		results, err = memStore.SearchDecisions(params.DecisionType, params.Keyword, params.Limit)
+	}
 	if err != nil {
 		return createErrorResponse(fmt.Sprintf("Failed to get decisions: %v", err))
 	}

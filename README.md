@@ -63,6 +63,8 @@ go build -o bin/mcp-context-server ./cmd/mcp-context-server
 
 3. Restart Claude Desktop and start coding.
 
+**Nota importante**: Si usas **Grok Build**, Claude Code, o varios asistentes a la vez, consulta la [guía completa de configuración](website/src/content/docs/guides/configuration.md). Incluye instrucciones detalladas para `.grok/config.toml`, configuración por proyecto y compatibilidad entre herramientas.
+
 ## Workflow Examples
 
 ### Onboarding to a New Repo
@@ -133,6 +135,20 @@ curl "http://localhost:3000/api/quick-context?query=database+migrations&maxToken
 | `promote-memory` | Mark a memory as high-value for persistent storage |
 | `get-promoted-memories` | List only the high-value promoted memories |
 | `memory-stats` | Aggregate memory statistics (counts, usage hits, storage size, limits) |
+| `resume-context` | Recover the shared handoff for a working path |
+| `save-handoff` | Save confirmed work state for another client |
+
+## Continuity between applications
+
+Claude, OpenCode and other local MCP clients can share work state when they use the same memory directory (`$HOME/.mcp-go-context/memory` by default).
+
+1. Call `resume-context` with the working path.
+2. Pass that path to `save-decision` and `remember-conversation`.
+3. Call `save-handoff` with `expectedRevision` after a milestone or before switching clients.
+
+Files and Git remain the source of truth. A handoff is recoverable work state, not a promoted decision. A `CONFLICT` response keeps both versions. Copy the short instruction block from [CLAUDE.md](CLAUDE.md) into Claude Desktop project instructions; OpenCode reads [AGENTS.md](AGENTS.md).
+
+Stop older server binaries before the first run of this version. It creates a backup under the memory directory and then uses cross-process locking that older binaries do not understand.
 
 ## HTTP REST API
 

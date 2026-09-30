@@ -25,3 +25,12 @@ MCP server in Go (stdio/http/sse) for project analysis, persistent memory, and d
 - Tests are hermetic: memory tests use `t.TempDir()`, no network required (`fetch-docs` has local fallback).
 - Docs drift: README and CONTRIBUTING occasionally lag the code — trust `Makefile`, `main.go` flags, and `server.go` registration over prose.
 - Commits: conventional commits (`feat:`, `fix:`, ...).
+
+## Continuity between clients
+
+- At the start of substantive work, call `resume-context` with the repository path.
+- Pass that same `path` to `save-decision` and `remember-conversation`.
+- After a milestone or before switching clients, call `save-handoff` with `expectedRevision`.
+- Files and Git remain the source of truth. A handoff is the shared work state, not a promoted decision.
+- On `CONFLICT`, keep both versions and reconcile them.
+- All local clients must use the same memory directory, by default `$HOME/.mcp-go-context/memory`.

@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"github.com/scopweb/mcp-go-context/internal/config"
+	"github.com/scopweb/mcp-go-context/internal/storage"
 )
 
 // Manager handles conversation memory persistence
@@ -164,9 +165,8 @@ func New(cfg config.MemoryConfig, project string) (*Manager, error) {
 	}
 
 	if cfg.Enabled {
-		// Ensure storage directory exists
-		if err := os.MkdirAll(cfg.StoragePath, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create memory storage: %w", err)
+		if err := prepareStorage(cfg.StoragePath); err != nil {
+			return nil, fmt.Errorf("failed to prepare memory storage: %w", err)
 		}
 
 		// Load existing sessions
@@ -191,53 +191,7 @@ func (m *Manager) Store(key, content string, tags []string) error {
 
 // StoreWithType saves a memory item with decision metadata
 func (m *Manager) StoreWithType(key, content string, tags []string, decisionType, reason string, alternatives []string) error {
-	if !m.config.Enabled {
-		return nil
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Get or create current session
-	session := m.getCurrentSession()
-
-	// Check MaxEntries limit before adding
-	if len(session.Memories) >= m.config.MaxEntries && m.config.MaxEntries > 0 {
-		// Evict lowest scored entry instead of just oldest
-		m.evictLowScored(session)
-	}
-
-	// Remove old key from indexes if updating
-	if _, exists := session.Memories[key]; exists {
-		m.removeFromIndexes(key, session.Memories[key])
-	}
-
-	// Store memory
-	mem := Memory{
-		Key:          key,
-		Content:      content,
-		Tags:         tags,
-		Timestamp:    time.Now(),
-		Usage:        0,
-		Project:      m.activeProject,
-		DecisionType: decisionType,
-		Reason:       reason,
-		Alternatives: alternatives,
-	}
-	// Auto-link before indexing so the new memory never matches itself
-	mem.Related = m.findRelated(mem)
-	session.Memories[key] = mem
-
-	// Update indexes
-	m.addToIndexes(key, mem)
-
-	// Backlink: make relations navigable in both directions
-	for _, relKey := range mem.Related {
-		m.addBacklink(relKey, key)
-	}
-
-	// Save to disk
-	return m.saveSession(session)
+	return m.StoreForProject(m.activeProject, key, content, tags, decisionType, reason, alternatives)
 }
 
 // Retrieve gets a memory item by key
@@ -246,20 +200,30 @@ func (m *Manager) Retrieve(key string) (*Memory, error) {
 		return nil, fmt.Errorf("memory disabled")
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	unlock, err := m.begin()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 
-	// Search across all sessions
-	for _, session := range m.sessions {
-		if memory, exists := session.Memories[key]; exists {
-			// Increment usage in the stored value, not just in a copy.
-			memory.Usage++
-			session.Memories[key] = memory
-			if err := m.saveSession(session); err != nil {
-				return nil, err
+	loc, found := m.findInProject(key, "")
+	if !found {
+		for _, session := range m.sessions {
+			if memory, exists := session.Memories[key]; exists {
+				loc = located{session: session, mapKey: key, mem: memory}
+				found = true
+				break
 			}
-			return &memory, nil
 		}
+	}
+	if found {
+		loc.mem.Usage++
+		loc.session.Memories[loc.mapKey] = loc.mem
+		if err := m.saveSession(loc.session); err != nil {
+			return nil, err
+		}
+		memory := loc.mem
+		return &memory, nil
 	}
 
 	return nil, fmt.Errorf("memory not found: %s", key)
@@ -271,9 +235,16 @@ func (m *Manager) Get(key string) (*Memory, error) {
 		return nil, fmt.Errorf("memory disabled")
 	}
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	unlock, err := m.begin()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 
+	if loc, found := m.findInProject(key, ""); found {
+		memoryCopy := loc.mem
+		return &memoryCopy, nil
+	}
 	for _, session := range m.sessions {
 		if memory, exists := session.Memories[key]; exists {
 			memoryCopy := memory
@@ -383,8 +354,11 @@ func (m *Manager) SearchWithProject(query string, tags []string, project string)
 		return nil, fmt.Errorf("memory disabled")
 	}
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	unlock, err := m.begin()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 
 	// Collect candidates using inverted index when possible
 	candidates := make(map[string]*Memory)
@@ -463,8 +437,11 @@ func (m *Manager) GetRecentMemories(limit int) ([]*Memory, error) {
 		return nil, fmt.Errorf("memory disabled")
 	}
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	unlock, err := m.begin()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 
 	var allMemories []*Memory
 
@@ -502,8 +479,11 @@ func (m *Manager) ListProjects() []ProjectStat {
 		return nil
 	}
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	unlock, err := m.begin()
+	if err != nil {
+		return nil
+	}
+	defer unlock()
 
 	counts := make(map[string]int)
 	for _, session := range m.sessions {
@@ -542,8 +522,11 @@ func (m *Manager) ListMemories(limit int, decisionType string) ([]*Memory, error
 		return nil, fmt.Errorf("memory disabled")
 	}
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	unlock, err := m.begin()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 
 	var allMemories []*Memory
 	for _, session := range m.sessions {
@@ -573,9 +556,17 @@ func (m *Manager) Delete(key string) error {
 		return fmt.Errorf("memory disabled")
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	unlock, err := m.begin()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 
+	if loc, found := m.findInProject(key, ""); found {
+		m.removeFromIndexes(loc.mapKey, loc.mem)
+		delete(loc.session.Memories, loc.mapKey)
+		return m.saveSession(loc.session)
+	}
 	for _, session := range m.sessions {
 		memory, exists := session.Memories[key]
 		if !exists {
@@ -593,8 +584,11 @@ func (m *Manager) Delete(key string) error {
 
 // Clear removes all memories
 func (m *Manager) Clear() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	unlock, err := m.begin()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 
 	m.sessions = make(map[string]*Session)
 	m.tagIndex = make(map[string]map[string]bool)
@@ -607,7 +601,7 @@ func (m *Manager) Clear() error {
 	}
 
 	for _, entry := range entries {
-		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".json" {
+		if !entry.IsDir() && isSessionFile(entry.Name()) {
 			os.Remove(filepath.Join(m.config.StoragePath, entry.Name()))
 		}
 	}
@@ -655,7 +649,7 @@ func (m *Manager) loadSessions() error {
 	}
 
 	for _, entry := range entries {
-		if !entry.IsDir() && filepath.Ext(entry.Name()) == ".json" {
+		if !entry.IsDir() && isSessionFile(entry.Name()) {
 			sessionID := strings.TrimSuffix(entry.Name(), ".json")
 
 			data, err := os.ReadFile(filepath.Join(m.config.StoragePath, entry.Name()))
@@ -682,7 +676,7 @@ func (m *Manager) saveSession(session *Session) error {
 	}
 
 	filename := filepath.Join(m.config.StoragePath, session.ID+".json")
-	return os.WriteFile(filename, data, 0644)
+	return storage.WriteAtomic(filename, data)
 }
 
 func (m *Manager) cleanupRoutine() {
@@ -695,22 +689,34 @@ func (m *Manager) cleanupRoutine() {
 }
 
 func (m *Manager) cleanup() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	unlock, err := m.begin()
+	if err != nil {
+		return
+	}
+	defer unlock()
 
 	cutoff := time.Now().AddDate(0, 0, -m.config.SessionTTLDays)
 
-	// Clean expired sessions
 	for id, session := range m.sessions {
-		if session.LastUsed.Before(cutoff) {
-			// Remove from indexes
-			for key, memory := range session.Memories {
-				m.removeFromIndexes(key, memory)
-				m.removeKeyFromRelated(key)
+		if !session.LastUsed.Before(cutoff) {
+			continue
+		}
+		kept := make(map[string]Memory)
+		for key, memory := range session.Memories {
+			if memory.Promoted {
+				kept[key] = memory
+				continue
 			}
+			m.removeFromIndexes(key, memory)
+			m.removeKeyFromRelated(key)
+		}
+		if len(kept) == 0 {
 			delete(m.sessions, id)
 			os.Remove(filepath.Join(m.config.StoragePath, id+".json"))
+			continue
 		}
+		session.Memories = kept
+		_ = m.saveSession(session)
 	}
 
 	// Limit total sessions with LRU eviction
@@ -724,7 +730,11 @@ func (m *Manager) cleanup() {
 		})
 
 		toRemove := len(m.sessions) - m.config.MaxSessions
-		for i := 0; i < toRemove && i < len(sessions); i++ {
+		removed := 0
+		for i := 0; i < len(sessions) && removed < toRemove; i++ {
+			if sessionHasPromoted(sessions[i]) {
+				continue
+			}
 			id := sessions[i].ID
 			for key, memory := range sessions[i].Memories {
 				m.removeFromIndexes(key, memory)
@@ -732,32 +742,18 @@ func (m *Manager) cleanup() {
 			}
 			delete(m.sessions, id)
 			os.Remove(filepath.Join(m.config.StoragePath, id+".json"))
+			removed++
 		}
 	}
 }
 
-// evictLowScored removes the memory with lowest search score
-func (m *Manager) evictLowScored(session *Session) {
-	if len(session.Memories) == 0 {
-		return
-	}
-
-	var lowestKey string
-	var lowestScore float64 = -1
-
-	for key, mem := range session.Memories {
-		score := m.calculateScore(&mem, "", nil, nil)
-		if lowestScore < 0 || score < lowestScore {
-			lowestScore = score
-			lowestKey = key
+func sessionHasPromoted(session *Session) bool {
+	for _, memory := range session.Memories {
+		if memory.Promoted {
+			return true
 		}
 	}
-
-	if lowestKey != "" {
-		m.removeFromIndexes(lowestKey, session.Memories[lowestKey])
-		delete(session.Memories, lowestKey)
-		m.removeKeyFromRelated(lowestKey)
-	}
+	return false
 }
 
 // findRelated returns up to maxRelatedMemories keys of memories related to
@@ -873,8 +869,7 @@ func (m *Manager) addToIndexes(key string, mem Memory) {
 		m.tagIndex[tagLower][key] = true
 	}
 
-	// Word index
-	words := tokenize(strings.ToLower(mem.Content))
+	words := tokenize(searchableText(&mem))
 	for _, word := range words {
 		if m.wordIndex[word] == nil {
 			m.wordIndex[word] = make(map[string]bool)
@@ -896,8 +891,7 @@ func (m *Manager) removeFromIndexes(key string, mem Memory) {
 		}
 	}
 
-	// From word index
-	words := tokenize(strings.ToLower(mem.Content))
+	words := tokenize(searchableText(&mem))
 	for _, word := range words {
 		if m.wordIndex[word] != nil {
 			delete(m.wordIndex[word], key)
@@ -962,8 +956,9 @@ func (m *Manager) calculateScore(mem *Memory, query string, queryWords []string,
 	}
 
 	var score float64
+	matched := false
+	text := searchableText(mem)
 
-	// Tag matching (30% weight)
 	if len(tags) > 0 {
 		tagScore := 0.0
 		memTagsLower := make(map[string]bool)
@@ -973,6 +968,7 @@ func (m *Manager) calculateScore(mem *Memory, query string, queryWords []string,
 		for _, tag := range tags {
 			if memTagsLower[strings.ToLower(tag)] {
 				tagScore++
+				matched = true
 			}
 		}
 		if len(tags) > 0 {
@@ -980,23 +976,31 @@ func (m *Manager) calculateScore(mem *Memory, query string, queryWords []string,
 		}
 	}
 
-	// Content word matching (40% weight)
-	if len(queryWords) > 0 {
-		contentWords := tokenize(strings.ToLower(mem.Content))
+	if query != "" && strings.Contains(text, query) {
+		matched = true
+		score += 0.45
+	} else if len(queryWords) > 0 {
+		contentWords := tokenize(text)
 		contentWordSet := make(map[string]bool)
 		for _, w := range contentWords {
 			contentWordSet[w] = true
 		}
-
 		matchCount := 0
 		for _, qw := range queryWords {
 			if contentWordSet[qw] {
 				matchCount++
 			}
 		}
-		if len(queryWords) > 0 {
+		if matchCount > 0 {
+			matched = true
 			score += (float64(matchCount) / float64(len(queryWords))) * 0.40
 		}
+	}
+	if (query != "" || len(tags) > 0) && !matched {
+		return 0
+	}
+	if mem.Promoted {
+		score += 0.12
 	}
 
 	// Recency (20% weight) - logarithmic scale
@@ -1029,53 +1033,7 @@ func contains(s, substr string) bool {
 
 // SearchDecisions finds decision memories by type and keywords
 func (m *Manager) SearchDecisions(decisionType, keyword string, limit int) ([]*Memory, error) {
-	if !m.config.Enabled {
-		return nil, fmt.Errorf("memory disabled")
-	}
-
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	var results []*Memory
-
-	for _, session := range m.sessions {
-		for _, memory := range session.Memories {
-			// Filter by decision type
-			if decisionType != "" && memory.DecisionType != decisionType {
-				continue
-			}
-
-			// Filter by keyword in content, reason, or alternatives
-			if keyword != "" {
-				found := contains(memory.Content, keyword) ||
-					contains(memory.Reason, keyword) ||
-					contains(memory.Key, keyword)
-				for _, alt := range memory.Alternatives {
-					if contains(alt, keyword) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					continue
-				}
-			}
-
-			memCopy := memory
-			results = append(results, &memCopy)
-		}
-	}
-
-	// Sort by timestamp
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Timestamp.After(results[j].Timestamp)
-	})
-
-	if limit > 0 && len(results) > limit {
-		return results[:limit], nil
-	}
-
-	return results, nil
+	return m.SearchDecisionsScoped(decisionType, keyword, "", limit)
 }
 
 // GetPromotedMemories returns only memories that have been promoted from session memory
@@ -1084,16 +1042,23 @@ func (m *Manager) GetPromotedMemories(limit int) ([]*Memory, error) {
 		return nil, fmt.Errorf("memory disabled")
 	}
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	unlock, err := m.begin()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 
 	var promoted []*Memory
 	for _, session := range m.sessions {
-		for _, memory := range session.Memories {
-			if memory.Promoted {
-				memCopy := memory
-				promoted = append(promoted, &memCopy)
+		for mapKey, memory := range session.Memories {
+			if memory.Key == "" {
+				memory.Key = mapKey
 			}
+			if !memory.Promoted || !m.matchesProject(&memory, "") {
+				continue
+			}
+			memCopy := memory
+			promoted = append(promoted, &memCopy)
 		}
 	}
 
@@ -1115,22 +1080,31 @@ func (m *Manager) Promote(key string, confidence string) error {
 		return fmt.Errorf("memory disabled")
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	unlock, err := m.begin()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 
-	// Find the memory across all sessions
-	for _, session := range m.sessions {
-		if memory, exists := session.Memories[key]; exists {
-			memory.Promoted = true
-			if confidence != "" {
-				memory.Confidence = confidence
+	loc, found := m.findInProject(key, "")
+	if !found {
+		for _, session := range m.sessions {
+			if memory, exists := session.Memories[key]; exists {
+				loc = located{session: session, mapKey: key, mem: memory}
+				found = true
+				break
 			}
-			session.Memories[key] = memory
-			return m.saveSession(session)
 		}
 	}
-
-	return fmt.Errorf("memory not found: %s", key)
+	if !found {
+		return fmt.Errorf("memory not found: %s", key)
+	}
+	loc.mem.Promoted = true
+	if confidence != "" {
+		loc.mem.Confidence = confidence
+	}
+	loc.session.Memories[loc.mapKey] = loc.mem
+	return m.saveSession(loc.session)
 }
 
 // Demote removes the promoted flag from a memory (reverts to session-only)
@@ -1139,18 +1113,19 @@ func (m *Manager) Demote(key string) error {
 		return fmt.Errorf("memory disabled")
 	}
 
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	for _, session := range m.sessions {
-		if memory, exists := session.Memories[key]; exists {
-			memory.Promoted = false
-			session.Memories[key] = memory
-			return m.saveSession(session)
-		}
+	unlock, err := m.begin()
+	if err != nil {
+		return err
 	}
+	defer unlock()
 
-	return fmt.Errorf("memory not found: %s", key)
+	loc, found := m.findInProject(key, "")
+	if !found {
+		return fmt.Errorf("memory not found: %s", key)
+	}
+	loc.mem.Promoted = false
+	loc.session.Memories[loc.mapKey] = loc.mem
+	return m.saveSession(loc.session)
 }
 
 // GetDecisionTypes returns all unique decision types in memory
@@ -1159,8 +1134,11 @@ func (m *Manager) GetDecisionTypes() ([]string, error) {
 		return nil, fmt.Errorf("memory disabled")
 	}
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	unlock, err := m.begin()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 
 	typeSet := make(map[string]bool)
 	for _, session := range m.sessions {
@@ -1193,8 +1171,11 @@ func (m *Manager) SuggestForPromotion(limit int) ([]*Memory, error) {
 		limit = 5
 	}
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	unlock, err := m.begin()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 
 	type scoredMem struct {
 		mem   *Memory
@@ -1236,8 +1217,11 @@ func (m *Manager) SuggestForPromotion(limit int) ([]*Memory, error) {
 	}
 
 	for _, session := range m.sessions {
-		for _, mem := range session.Memories {
-			if mem.Promoted {
+		for mapKey, mem := range session.Memories {
+			if mem.Key == "" {
+				mem.Key = mapKey
+			}
+			if mem.Promoted || !m.matchesProject(&mem, "") {
 				continue
 			}
 

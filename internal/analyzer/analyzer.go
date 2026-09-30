@@ -239,12 +239,12 @@ func (a *ProjectAnalyzer) GetRelevantContext(query string, files []string, maxTo
 	// If specific files requested
 	if len(files) > 0 {
 		for _, file := range files {
-			content, err := a.getFileContext(file, maxTokens-tokenCount)
-			if err != nil {
+			content, err := a.getFileContext(file, remainingChars(maxTokens, tokenCount))
+			if err != nil || content == "" {
 				continue
 			}
 			context.WriteString(content)
-			tokenCount += len(content) / 4 // Approximate token count
+			tokenCount += len(content) / 4
 
 			if tokenCount >= maxTokens {
 				break
@@ -257,8 +257,8 @@ func (a *ProjectAnalyzer) GetRelevantContext(query string, files []string, maxTo
 
 		relevantFiles := a.findRelevantFiles(query)
 		for _, file := range relevantFiles {
-			content, err := a.getFileContext(file.Path, maxTokens-tokenCount)
-			if err != nil {
+			content, err := a.getFileContext(file.Path, remainingChars(maxTokens, tokenCount))
+			if err != nil || content == "" {
 				continue
 			}
 			context.WriteString(content)
@@ -913,7 +913,18 @@ func (a *ProjectAnalyzer) findRelevantFiles(query string) []*FileInfo {
 	return relevant
 }
 
+func remainingChars(maxTokens, usedTokens int) int {
+	remaining := maxTokens - usedTokens
+	if remaining <= 0 {
+		return 0
+	}
+	return remaining * 4
+}
+
 func (a *ProjectAnalyzer) getFileContext(path string, maxChars int) (string, error) {
+	if maxChars <= 0 {
+		return "", nil
+	}
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return "", err

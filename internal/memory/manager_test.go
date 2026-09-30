@@ -636,6 +636,9 @@ func TestMemoryUnassignedLegacy(t *testing.T) {
 		Timestamp: time.Now(),
 	}
 	m.addToIndexes("legacy", sess.Memories["legacy"])
+	if err := m.saveSession(sess); err != nil {
+		t.Fatal(err)
+	}
 
 	// Active project search must NOT include legacy.
 	results, _ := m.Search("widgets", nil)
@@ -680,6 +683,9 @@ func TestListProjects(t *testing.T) {
 	// Inject a legacy entry.
 	sess := m.getCurrentSession()
 	sess.Memories["legacy"] = Memory{Key: "legacy", Content: "old", Timestamp: time.Now()}
+	if err := m.saveSession(sess); err != nil {
+		t.Fatal(err)
+	}
 
 	stats := m.ListProjects()
 	counts := map[string]int{}

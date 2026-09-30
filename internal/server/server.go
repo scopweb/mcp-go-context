@@ -10,6 +10,7 @@ import (
 	"github.com/scopweb/mcp-go-context/internal/analyzer"
 	"github.com/scopweb/mcp-go-context/internal/buildinfo"
 	"github.com/scopweb/mcp-go-context/internal/config"
+	"github.com/scopweb/mcp-go-context/internal/continuity"
 	"github.com/scopweb/mcp-go-context/internal/dashboard"
 	"github.com/scopweb/mcp-go-context/internal/memory"
 	"github.com/scopweb/mcp-go-context/internal/tools"
@@ -18,11 +19,12 @@ import (
 
 // Server represents the MCP Context Server
 type Server struct {
-	config    *config.Config
-	transport transport.Transport
-	analyzer  *analyzer.ProjectAnalyzer
-	memory    *memory.Manager
-	tools     *tools.Registry
+	config     *config.Config
+	transport  transport.Transport
+	analyzer   *analyzer.ProjectAnalyzer
+	memory     *memory.Manager
+	continuity *continuity.Service
+	tools      *tools.Registry
 }
 
 // New creates a new MCP Context Server
@@ -57,6 +59,8 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to create memory manager: %w", err)
 	}
 
+	continuitySvc := continuity.New(cfg.Memory.StoragePath, memoryManager)
+
 	dashboardHandler, err := dashboard.New(memoryManager, projectAnalyzer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create dashboard handler: %w", err)
@@ -64,11 +68,12 @@ func New(cfg *config.Config) (*Server, error) {
 
 	// Create server
 	srv := &Server{
-		config:    cfg,
-		transport: trans,
-		analyzer:  projectAnalyzer,
-		memory:    memoryManager,
-		tools:     tools.NewRegistry(),
+		config:     cfg,
+		transport:  trans,
+		analyzer:   projectAnalyzer,
+		memory:     memoryManager,
+		continuity: continuitySvc,
+		tools:      tools.NewRegistry(),
 	}
 
 	if routeConfigurer, ok := trans.(transport.HTTPRouteConfigurer); ok {
@@ -191,18 +196,21 @@ func (s *Server) handleInitialize(id interface{}, protocolVersion string) (inter
 			"name":    "MCP Context Server",
 			"version": buildinfo.Version,
 		},
-		"instructions": `This server provides project context analysis and persistent technical memory for coding assistants.
+		"instructions": `This server provides project context analysis and technical memory shared between coding clients on the same machine.
 
-MEMORY CONVERGENCE (very important):
-This server works together with Claude's SessionMemory (summary.md).
-- Use SessionMemory for transient session summarization.
-- Use this server for durable, high-value technical knowledge that should survive across sessions.
+CONTINUITY:
+1. At the start of substantive work, call resume-context with the working path.
+2. Treat files and Git as the source of truth. Use the handoff for objective, pending work and next step.
+3. Pass the same path to save-decision and remember-conversation so memories stay with that project.
+4. After a milestone, before switching clients, or before ending work, call save-handoff with expectedRevision.
+5. A CONFLICT result preserves both versions. Reconcile them; do not overwrite either.
+6. Promote only durable decisions. Do not promote transient handoffs.
 
-RECOMMENDED MEMORY WORKFLOW:
-1. When you make important technical decisions, fixes or establish conventions → call save-decision (include type, reason and alternatives when possible).
-2. Before finishing a complex task or long session → call suggest-promotions to discover what deserves to be kept long-term.
-3. Review the suggestions and use promote-memory on the most valuable items.
-4. In future sessions, promoted memories will be automatically surfaced by get-context and search-memory.
+MEMORY WORKFLOW:
+1. Record important decisions with save-decision, including reason and alternatives.
+2. Before ending complex work, call suggest-promotions.
+3. Use promote-memory for items that must survive cleanup.
+4. Later clients can retrieve them with resume-context, get-context and search-memory.
 
 Available tools:
 - analyze-project: Full project structure, languages, dependencies and key files.
@@ -265,6 +273,10 @@ func (s *Server) GetMemory() tools.MemoryInterface {
 // GetConfig returns the server configuration
 func (s *Server) GetConfig() tools.ConfigInterface {
 	return s.config
+}
+
+func (s *Server) Continuity() *continuity.Service {
+	return s.continuity
 }
 
 // registerTools registers all available tools to the server
@@ -371,6 +383,14 @@ func (s *Server) registerTools() {
 					"items": map[string]interface{}{
 						"type": "string",
 					},
+				},
+				"path": map[string]interface{}{
+					"type":        "string",
+					"description": "Working directory used to bind the memory to a stable project",
+				},
+				"project": map[string]interface{}{
+					"type":        "string",
+					"description": "Explicit project id. Optional when path is provided",
 				},
 			},
 			"required": []string{"key", "content"},
@@ -490,6 +510,14 @@ func (s *Server) registerTools() {
 						"type": "string",
 					},
 				},
+				"path": map[string]interface{}{
+					"type":        "string",
+					"description": "Working directory used to bind the decision to a stable project",
+				},
+				"project": map[string]interface{}{
+					"type":        "string",
+					"description": "Explicit project id. Optional when path is provided",
+				},
 			},
 			"required": []string{"key", "content"},
 		},
@@ -510,6 +538,10 @@ func (s *Server) registerTools() {
 				"keyword": map[string]interface{}{
 					"type":        "string",
 					"description": "Search keyword in decision content",
+				},
+				"project": map[string]interface{}{
+					"type":        "string",
+					"description": "Project id. Omit for the active project, '*' for all, 'unassigned' for legacy memories",
 				},
 				"limit": map[string]interface{}{
 					"type":        "integer",
@@ -582,5 +614,44 @@ func (s *Server) registerTools() {
 			"properties": map[string]interface{}{},
 		},
 		Handler: tools.MemoryStatsHandler,
+	})
+
+
+	s.tools.Register(&tools.Tool{
+		Name:        "save-handoff",
+		Description: "Saves a recoverable work summary for another coding client. Pass the working path, expectedRevision from the last resume, and the confirmed objective, pending work and next step. Does not overwrite a newer revision.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"path":             map[string]interface{}{"type": "string", "description": "Working directory or repository path"},
+				"projectId":        map[string]interface{}{"type": "string", "description": "Stable project id, optional if path is given"},
+				"handoffId":        map[string]interface{}{"type": "string", "description": "Work-context id. Defaults to the current branch"},
+				"expectedRevision": map[string]interface{}{"type": "integer", "description": "Revision last read. Use 0 only when creating"},
+				"sourceClient":     map[string]interface{}{"type": "string", "description": "Client saving the handoff, such as Claude or OpenCode"},
+				"objective":        map[string]interface{}{"type": "string", "description": "Current objective"},
+				"completed":        map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+				"verification":     map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+				"pending":          map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+				"nextStep":         map[string]interface{}{"type": "string", "description": "Concrete next step"},
+				"references":       map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+			},
+		},
+		Handler: tools.SaveHandoffHandler,
+	})
+
+	s.tools.Register(&tools.Tool{
+		Name:        "resume-context",
+		Description: "Recovers the shared project handoff and relevant decisions for a working path. Call this before substantive work. It does not select a handoff from another branch automatically.",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"path":      map[string]interface{}{"type": "string", "description": "Working directory or repository path"},
+				"projectId": map[string]interface{}{"type": "string", "description": "Stable project id, optional if path is given"},
+				"handoffId": map[string]interface{}{"type": "string", "description": "Specific handoff to open"},
+				"query":     map[string]interface{}{"type": "string", "description": "Optional topic used to retrieve related memories"},
+				"maxTokens": map[string]interface{}{"type": "integer", "description": "Approximate response budget"},
+			},
+		},
+		Handler: tools.ResumeContextHandler,
 	})
 }
