@@ -573,6 +573,8 @@ func (m *Manager) Delete(key string) error {
 	if loc, found := m.findInProject(key, ""); found {
 		m.removeFromIndexes(loc.mapKey, loc.mem)
 		delete(loc.session.Memories, loc.mapKey)
+		m.removeKeyFromRelated(key)
+		m.removeKeyFromRelated(loc.mapKey)
 		return m.saveSession(loc.session)
 	}
 	for _, session := range m.sessions {
