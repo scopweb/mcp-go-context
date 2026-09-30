@@ -649,6 +649,7 @@ func (s *Server) registerTools() {
 				"projectId": map[string]interface{}{"type": "string", "description": "Stable project id, optional if path is given"},
 				"handoffId": map[string]interface{}{"type": "string", "description": "Specific handoff to open"},
 				"query":     map[string]interface{}{"type": "string", "description": "Optional topic used to retrieve related memories"},
+				"depth":     map[string]interface{}{"type": "string", "description": "wake (default, short) or full"},
 				"maxTokens": map[string]interface{}{"type": "integer", "description": "Approximate response budget"},
 			},
 		},

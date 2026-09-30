@@ -112,6 +112,7 @@ func ResumeContextHandler(args json.RawMessage, server interface{}) (interface{}
 		ProjectID string `json:"projectId"`
 		HandoffID string `json:"handoffId"`
 		Query     string `json:"query"`
+		Depth     string `json:"depth"`
 		MaxTokens int    `json:"maxTokens"`
 	}
 	if err := json.Unmarshal(args, &params); err != nil {
@@ -121,7 +122,7 @@ func ResumeContextHandler(args json.RawMessage, server interface{}) (interface{}
 	if err != nil {
 		return createErrorResponse(err.Error())
 	}
-	view, err := svc.Resume(params.Path, params.ProjectID, params.HandoffID, params.Query, params.MaxTokens)
+	view, err := svc.Resume(params.Path, params.ProjectID, params.HandoffID, params.Query, params.Depth, params.MaxTokens)
 	if err != nil {
 		return createErrorResponse(err.Error())
 	}

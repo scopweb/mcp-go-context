@@ -34,3 +34,6 @@ MCP server in Go (stdio/http/sse) for project analysis, persistent memory, and d
 - Files and Git remain the source of truth. A handoff is the shared work state, not a promoted decision.
 - On `CONFLICT`, keep both versions and reconcile them.
 - All local clients must use the same memory directory, by default `$HOME/.mcp-go-context/memory`.
+- `resume-context` defaults to a short wake-up. Pass `depth=full` for the complete handoff.
+- Updating a decision supersedes the previous version. Search returns only the current one.
+- Event save, without relying on the model: `bin\mcp-context-server.exe checkpoint --path <repo> --event stop --transcript <jsonl> --client claude`. It writes handoff `auto` and does not replace the confirmed handoff. Claude Code can call `hooks\checkpoint.ps1` from Stop and PreCompact.

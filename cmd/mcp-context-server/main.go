@@ -15,6 +15,9 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "checkpoint" {
+		os.Exit(runCheckpoint(os.Args[2:]))
+	}
 	var (
 		configPath = flag.String("config", "", "Path to configuration file")
 		transport  = flag.String("transport", "stdio", "Transport type: stdio, http, or sse")

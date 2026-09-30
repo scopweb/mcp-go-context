@@ -21,6 +21,16 @@ Los archivos y Git siguen siendo la fuente de verdad del código. El resumen sol
 3. Antes de cambiar de aplicación, guarda con `save-handoff` y la `expectedRevision` leída.
 4. Si la respuesta contiene `CONFLICT`, conserva ambas versiones y reconcilialas.
 
+`resume-context` devuelve un despertar corto. Usa `depth=full` para el handoff completo. Actualizar una decisión conserva la versión anterior como sustituida y las búsquedas devuelven solo la vigente.
+
+El guardado por evento no depende del modelo:
+
+```text
+bin\mcp-context-server.exe checkpoint --path <repo> --event stop --transcript <jsonl> --client claude
+```
+
+Escribe el handoff `auto` y no reemplaza el handoff confirmado. En Claude Code, Stop y PreCompact pueden llamar a `hooks/checkpoint.ps1`.
+
 Una consulta no escribe dentro del repositorio. La identidad del proyecto se guarda en el directorio de memoria. Abrir una subcarpeta resuelve la raíz Git cuando existe. Dos carpetas con el mismo nombre permanecen separadas.
 
 ## Instrucción para cada cliente

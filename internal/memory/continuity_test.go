@@ -103,6 +103,44 @@ func TestPromotedMemorySurvivesCleanup(t *testing.T) {
 	}
 }
 
+func TestDecisionSupersedeKeepsHistory(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.MemoryConfig{Enabled: true, StoragePath: dir, MaxEntries: 20, MaxResults: 10, SessionTTLDays: 30}
+	m, err := New(cfg, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.StoreWithType("store", "use files", nil, "architecture", "simple", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.StoreWithType("store", "use locked files", nil, "architecture", "two processes", nil); err != nil {
+		t.Fatal(err)
+	}
+	current, err := m.Get("store")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Content != "use locked files" || current.Status != "active" || current.Supersedes == "" {
+		t.Fatalf("current = %+v", current)
+	}
+	history, err := m.DecisionHistory("store", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 || history[0].Content != "use files" || history[0].ValidTo == nil {
+		t.Fatalf("history = %+v", history)
+	}
+	found, err := m.Search("simple", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mem := range found {
+		if mem.Content == "use files" {
+			t.Fatal("superseded decision returned as current")
+		}
+	}
+}
+
 func TestSearchRequiresRelevance(t *testing.T) {
 	dir := t.TempDir()
 	cfg := config.MemoryConfig{Enabled: true, StoragePath: dir, MaxEntries: 20, MaxResults: 10, SessionTTLDays: 30}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -76,6 +77,7 @@ func (m *Manager) StoreForProject(project, key, content string, tags []string, d
 	loc, found := m.findInProject(key, project)
 	session := loc.session
 	mapKey := loc.mapKey
+	archiveKey := ""
 	if !found {
 		session = m.getCurrentSession()
 		mapKey = m.freshMapKey(key, project)
@@ -86,18 +88,29 @@ func (m *Manager) StoreForProject(project, key, content string, tags []string, d
 		}
 	} else {
 		m.removeFromIndexes(mapKey, loc.mem)
+		if m.shouldSupersede(loc.mem, content, decisionType, reason) {
+			if m.config.MaxEntries > 0 && len(session.Memories) >= m.config.MaxEntries {
+				if !m.evictLowScored(session) {
+					return ErrCapacity
+				}
+			}
+			archiveKey = m.archiveSuperseded(session, mapKey, loc.mem, key)
+		}
 	}
 
+	now := time.Now().UTC()
 	mem := Memory{
 		Key:          key,
 		Content:      content,
 		Tags:         tags,
-		Timestamp:    time.Now().UTC(),
+		Timestamp:    now,
 		Usage:        0,
 		Project:      project,
 		DecisionType: decisionType,
 		Reason:       reason,
 		Alternatives: alternatives,
+		Status:       "active",
+		ValidFrom:    now,
 	}
 	if found {
 		mem.Usage = loc.mem.Usage
@@ -115,6 +128,7 @@ func (m *Manager) StoreForProject(project, key, content string, tags []string, d
 		if len(mem.Tags) == 0 {
 			mem.Tags = loc.mem.Tags
 		}
+		mem.Supersedes = archiveKey
 	}
 	mem.Related = m.findRelated(mem)
 	session.Memories[mapKey] = mem
@@ -131,7 +145,7 @@ func (m *Manager) findInProject(userKey, project string) (located, bool) {
 			if mem.Key == "" {
 				mem.Key = mapKey
 			}
-			if mem.Key != userKey {
+			if mem.Key != userKey || isSuperseded(mem) {
 				continue
 			}
 			if m.matchesProject(&mem, project) {
@@ -163,12 +177,40 @@ func (m *Manager) freshMapKey(userKey, project string) string {
 	return userKey
 }
 
+func (m *Manager) shouldSupersede(old Memory, content, decisionType, reason string) bool {
+	if old.DecisionType == "" && decisionType == "" {
+		return false
+	}
+	return old.Content != content || old.Reason != reason || (decisionType != "" && decisionType != old.DecisionType)
+}
+
+func (m *Manager) archiveSuperseded(session *Session, mapKey string, old Memory, userKey string) string {
+	now := time.Now().UTC()
+	old.Status = "superseded"
+	old.ValidTo = &now
+	old.SupersededBy = userKey
+	archiveKey := mapKey + "#" + strconv.FormatInt(now.UnixNano(), 10)
+	session.Memories[archiveKey] = old
+	return archiveKey
+}
+
+func isSuperseded(mem Memory) bool {
+	return mem.Status == "superseded" || mem.ValidTo != nil
+}
+
 func (m *Manager) evictLowScored(session *Session) bool {
+	for key, mem := range session.Memories {
+		if isSuperseded(mem) {
+			m.removeFromIndexes(key, mem)
+			delete(session.Memories, key)
+			return true
+		}
+	}
 	var lowestKey string
 	var lowestScore float64
 	found := false
 	for key, mem := range session.Memories {
-		if mem.Promoted {
+		if mem.Promoted || isSuperseded(mem) {
 			continue
 		}
 		score := m.calculateScore(&mem, "", nil, nil)
@@ -267,7 +309,7 @@ func (m *Manager) SearchDecisionsScoped(decisionType, keyword, project string, l
 			if mem.Key == "" {
 				mem.Key = mapKey
 			}
-			if !m.matchesProject(&mem, project) {
+			if !m.matchesProject(&mem, project) || isSuperseded(mem) {
 				continue
 			}
 			if decisionType != "" && mem.DecisionType != decisionType {
@@ -303,6 +345,35 @@ func trimMemories(results []*Memory, limit int) []*Memory {
 		return results[:limit]
 	}
 	return results
+}
+
+// DecisionHistory returns superseded snapshots for a current decision key, newest first.
+func (m *Manager) DecisionHistory(key, project string) ([]*Memory, error) {
+	if !m.config.Enabled {
+		return nil, fmt.Errorf("memory disabled")
+	}
+	unlock, err := m.begin()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	var out []*Memory
+	for _, session := range m.sessions {
+		for _, mem := range session.Memories {
+			if mem.Key != key || !isSuperseded(mem) || !m.matchesProject(&mem, project) {
+				continue
+			}
+			copy := mem
+			out = append(out, &copy)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ValidTo == nil || out[j].ValidTo == nil {
+			return out[i].Timestamp.After(out[j].Timestamp)
+		}
+		return out[i].ValidTo.After(*out[j].ValidTo)
+	})
+	return out, nil
 }
 
 func searchableText(mem *Memory) string {

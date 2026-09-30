@@ -56,12 +56,12 @@ func TestHandoffRoundTripAndConflict(t *testing.T) {
 	if conflict.Current.Revision != 2 || conflict.SavedAs == "" {
 		t.Fatalf("conflict = %+v", conflict)
 	}
-	view, err := svc.Resume(root, "", first.HandoffID, "", 1000)
+	view, err := svc.Resume(root, "", "", "", "full", 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if view.Handoff == nil || view.Handoff.NextStep != "run tests" {
-		t.Fatalf("resumed %#v project=%+v candidates=%d", view.Handoff, view.Project, len(view.Candidates))
+	if view.Handoff == nil || view.Handoff.HandoffID != first.HandoffID || view.Handoff.NextStep != "run tests" {
+		t.Fatalf("automatic resume selected %#v", view.Handoff)
 	}
 	text := FormatResume(view, 1000)
 	if !strings.Contains(text, "run tests") || !strings.Contains(text, first.ProjectID) {
@@ -78,7 +78,7 @@ func TestResumeDoesNotSelectAnotherBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := exec.LookPath("git"); err != nil {
-		view, err := svc.Resume(root, saved.ProjectID, "", "", 500)
+		view, err := svc.Resume(root, saved.ProjectID, "", "", "", 500)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -93,7 +93,7 @@ func TestResumeDoesNotSelectAnotherBranch(t *testing.T) {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
 	exec.Command("git", "-C", root, "checkout", "-b", "main").Run()
-	view, err := svc.Resume(root, "", "", "", 500)
+	view, err := svc.Resume(root, "", "", "", "", 500)
 	if err != nil {
 		t.Fatal(err)
 	}

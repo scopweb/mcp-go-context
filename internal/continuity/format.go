@@ -8,8 +8,70 @@ import (
 	"github.com/scopweb/mcp-go-context/internal/memory"
 )
 
-// FormatResume renders a bounded continuity brief.
+// FormatResume renders a wake-up brief by default, or the full handoff when depth is full.
 func FormatResume(view ResumeView, maxTokens int) string {
+	if view.Depth != "full" {
+		if maxTokens <= 0 || maxTokens > 800 {
+			maxTokens = 800
+		}
+		return formatWake(view, maxTokens)
+	}
+	return formatFull(view, maxTokens)
+}
+
+func formatWake(view ResumeView, maxTokens int) string {
+	var b strings.Builder
+	b.WriteString("# Wake-up\n\n")
+	if view.Project.ID == "" {
+		b.WriteString("No stored project identity for this path.\n")
+		if view.Project.Root != "" {
+			b.WriteString("Detected root: `" + view.Project.Root + "`\n")
+		}
+		b.WriteString("Call save-handoff or save-decision with this path before assuming prior work.\n")
+		return clip(b.String(), maxTokens)
+	}
+	b.WriteString(fmt.Sprintf("Project `%s`, branch `%s`, commit `%s`.\n", view.Project.ID, empty(view.Project.Branch), shortCommit(view.Project.Commit)))
+	b.WriteString("Files and Git are the source of truth.\n\n")
+	if view.Handoff == nil {
+		b.WriteString("No confirmed handoff for this branch.\n")
+	} else {
+		h := view.Handoff
+		b.WriteString(fmt.Sprintf("Handoff `%s` revision %d, updated %s.\n", h.HandoffID, h.Revision, h.UpdatedAt.Format(time.RFC3339)))
+		writeSection(&b, "Objective", h.Objective)
+		writeSection(&b, "Next step", h.NextStep)
+		pending := h.Pending
+		if len(pending) > 3 {
+			pending = pending[:3]
+		}
+		writeList(&b, "Pending", pending)
+		if view.Drift != "" {
+			b.WriteString("\nDrift: " + view.Drift + "\n")
+		}
+	}
+	if view.Auto != nil {
+		b.WriteString(fmt.Sprintf("\nLast automatic checkpoint: revision %d at %s — %s\n", view.Auto.Revision, view.Auto.UpdatedAt.Format(time.RFC3339), oneLine(view.Auto.NextStep)))
+	}
+	if len(view.Decisions) > 0 {
+		b.WriteString("\n## Current decisions\n\n")
+		limit := view.Decisions
+		if len(limit) > 2 {
+			limit = limit[:2]
+		}
+		for _, mem := range limit {
+			writeMemory(&b, mem)
+		}
+	}
+	if len(view.Memories) > 0 {
+		b.WriteString("\n## Related\n\n")
+		for _, mem := range view.Memories {
+			writeMemory(&b, mem)
+		}
+	}
+	b.WriteString("\nCall resume-context with depth=full for the complete handoff.\n")
+	return clip(b.String(), maxTokens)
+}
+
+func formatFull(view ResumeView, maxTokens int) string {
 	var b strings.Builder
 	b.WriteString("# Continuity\n\n")
 	if view.Project.ID == "" {
@@ -63,6 +125,9 @@ func FormatResume(view ResumeView, maxTokens int) string {
 		writeList(&b, "References", h.References)
 		b.WriteString("\n")
 	}
+	if view.Auto != nil {
+		b.WriteString(fmt.Sprintf("Automatic checkpoint `%s` revision %d: %s\n\n", view.Auto.HandoffID, view.Auto.Revision, oneLine(view.Auto.NextStep)))
+	}
 
 	if len(view.Decisions) > 0 {
 		b.WriteString("## Relevant decisions\n\n")
@@ -105,6 +170,9 @@ func writeMemory(b *strings.Builder, mem *memory.Memory) {
 	b.WriteString(fmt.Sprintf("- `%s`", mem.Key))
 	if mem.DecisionType != "" {
 		b.WriteString(" (" + mem.DecisionType + ")")
+	}
+	if mem.Status == "superseded" {
+		b.WriteString(" [superseded]")
 	}
 	b.WriteString(": " + oneLine(truncate(mem.Content, 280)) + "\n")
 }

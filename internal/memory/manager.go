@@ -48,9 +48,14 @@ type Memory struct {
 	Promoted   bool   `json:"promoted,omitempty"`   // true if promoted from session memory
 	Confidence string `json:"confidence,omitempty"` // "low", "medium", "high" - stability of this memory
 	// Decision-specific fields
-	DecisionType string   `json:"decisionType,omitempty"` // architecture, fix, approach, etc.
-	Reason       string   `json:"reason,omitempty"`       // why this decision was made
-	Alternatives []string `json:"alternatives,omitempty"` // what else was considered
+	DecisionType string     `json:"decisionType,omitempty"` // architecture, fix, approach, etc.
+	Reason       string     `json:"reason,omitempty"`       // why this decision was made
+	Alternatives []string   `json:"alternatives,omitempty"` // what else was considered
+	Status       string     `json:"status,omitempty"`
+	ValidFrom    time.Time  `json:"validFrom,omitempty"`
+	ValidTo      *time.Time `json:"validTo,omitempty"`
+	Supersedes   string     `json:"supersedes,omitempty"`
+	SupersededBy string     `json:"supersededBy,omitempty"`
 	// Related holds keys of auto-linked memories (shared tags + word overlap).
 	// Links are bidirectional: storing A linked to B also adds A to B.Related.
 	Related []string `json:"related,omitempty"`
@@ -395,9 +400,12 @@ func (m *Manager) SearchWithProject(query string, tags []string, project string)
 	// If no index hits, fall back to scanning all memories
 	if len(candidates) == 0 {
 		for _, session := range m.sessions {
-			for _, memory := range session.Memories {
+			for mapKey, memory := range session.Memories {
+				if isSuperseded(memory) {
+					continue
+				}
 				memCopy := memory
-				candidates[memory.Key] = &memCopy
+				candidates[mapKey] = &memCopy
 			}
 		}
 	}
@@ -951,7 +959,7 @@ func tokenize(text string) []string {
 
 // calculateScore computes a relevance score for a memory
 func (m *Manager) calculateScore(mem *Memory, query string, queryWords []string, tags []string) float64 {
-	if mem == nil {
+	if mem == nil || isSuperseded(*mem) {
 		return 0
 	}
 
@@ -1054,7 +1062,7 @@ func (m *Manager) GetPromotedMemories(limit int) ([]*Memory, error) {
 			if memory.Key == "" {
 				memory.Key = mapKey
 			}
-			if !memory.Promoted || !m.matchesProject(&memory, "") {
+			if !memory.Promoted || isSuperseded(memory) || !m.matchesProject(&memory, "") {
 				continue
 			}
 			memCopy := memory
@@ -1221,7 +1229,7 @@ func (m *Manager) SuggestForPromotion(limit int) ([]*Memory, error) {
 			if mem.Key == "" {
 				mem.Key = mapKey
 			}
-			if mem.Promoted || !m.matchesProject(&mem, "") {
+			if mem.Promoted || isSuperseded(mem) || !m.matchesProject(&mem, "") {
 				continue
 			}
 

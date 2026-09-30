@@ -16,6 +16,9 @@ import (
 
 const schemaVersion = 1
 
+// AutoHandoffID is the slot written by client hooks. It never replaces a confirmed handoff.
+const AutoHandoffID = "auto"
+
 const (
 	maxText  = 4000
 	maxItem  = 500
@@ -81,12 +84,14 @@ func (e *ConflictError) Error() string {
 type ResumeView struct {
 	Project    project.Resolved
 	Handoff    *Handoff
+	Auto       *Handoff
 	Candidates []Handoff
 	Drift      string
 	Decisions  []*memory.Memory
 	Memories   []*memory.Memory
 	NoIdentity bool
 	NoHandoff  bool
+	Depth      string
 }
 
 // Service stores handoffs beside the shared memory directory.
@@ -164,12 +169,58 @@ func (s *Service) Save(in Input) (Result, error) {
 	}, nil
 }
 
-func (s *Service) Resume(path, projectID, handoffID, query string, maxTokens int) (ResumeView, error) {
+// SaveAuto replaces the hook checkpoint without creating a conflict artifact.
+func (s *Service) SaveAuto(path, client, objective, nextStep string, pending []string) (Result, error) {
+	in := Input{
+		Path:         path,
+		HandoffID:    AutoHandoffID,
+		SourceClient: client,
+		Objective:    objective,
+		Pending:      pending,
+		NextStep:     nextStep,
+	}
+	if err := validate(in); err != nil {
+		return Result{}, err
+	}
+	resolved, err := project.Resolve(s.storage, path, "", true)
+	if err != nil {
+		return Result{}, err
+	}
+	unlock, err := storage.Lock(s.storage)
+	if err != nil {
+		return Result{}, err
+	}
+	defer unlock()
+	current, found, err := load(s.storage, resolved.ID, AutoHandoffID)
+	if err != nil {
+		return Result{}, err
+	}
+	next := build(resolved, AutoHandoffID, in)
+	next.Revision = 1
+	if found {
+		prev := stripHistory(current)
+		next.History = append([]Handoff{prev}, current.History...)
+		if len(next.History) > maxHist {
+			next.History = next.History[:maxHist]
+		}
+		next.Revision = current.Revision + 1
+	}
+	next.UpdatedAt = time.Now().UTC()
+	if err := save(s.storage, next); err != nil {
+		return Result{}, err
+	}
+	return Result{ProjectID: resolved.ID, HandoffID: AutoHandoffID, Revision: next.Revision, Branch: next.Branch, Commit: next.Commit}, nil
+}
+
+func (s *Service) Resume(path, projectID, handoffID, query, depth string, maxTokens int) (ResumeView, error) {
 	resolved, err := project.Resolve(s.storage, path, projectID, false)
 	if err != nil {
 		return ResumeView{}, err
 	}
-	view := ResumeView{Project: resolved}
+	if depth == "" {
+		depth = "wake"
+	}
+	view := ResumeView{Project: resolved, Depth: depth}
 	if !resolved.Persisted || resolved.ID == "" {
 		view.NoIdentity = true
 		view.NoHandoff = true
@@ -178,6 +229,13 @@ func (s *Service) Resume(path, projectID, handoffID, query string, maxTokens int
 	all, err := list(s.storage, resolved.ID)
 	if err != nil {
 		return ResumeView{}, err
+	}
+	for _, item := range all {
+		if item.HandoffID == AutoHandoffID {
+			copy := stripHistory(item)
+			view.Auto = &copy
+			break
+		}
 	}
 	selected, candidates, ok := selectHandoff(all, handoffID, resolved.Branch)
 	if ok {
@@ -281,16 +339,31 @@ func selectHandoff(all []Handoff, requested, branch string) (Handoff, []Handoff,
 		}
 		return Handoff{}, summarize(all), false
 	}
+	pool := currentHandoffs(all)
 	var matches []Handoff
-	for _, item := range all {
+	for _, item := range pool {
 		if branch != "" && item.Branch == branch {
 			matches = append(matches, item)
 		}
+	}
+	if len(matches) == 0 && len(pool) == 1 && (branch == "" || pool[0].Branch == "" || pool[0].Branch == branch) {
+		matches = pool
 	}
 	if len(matches) == 1 {
 		return matches[0], nil, true
 	}
 	if len(matches) > 1 {
+		preferred := defaultHandoffID(branch)
+		var preferredMatch *Handoff
+		for i := range matches {
+			if matches[i].HandoffID == preferred {
+				preferredMatch = &matches[i]
+				break
+			}
+		}
+		if preferredMatch != nil {
+			return *preferredMatch, nil, true
+		}
 		best := matches[0]
 		for _, item := range matches[1:] {
 			if item.UpdatedAt.After(best.UpdatedAt) {
@@ -299,10 +372,36 @@ func selectHandoff(all []Handoff, requested, branch string) (Handoff, []Handoff,
 		}
 		return best, nil, true
 	}
-	if len(all) == 1 && (branch == "" || all[0].Branch == "" || all[0].Branch == branch) {
-		return all[0], nil, true
-	}
 	return Handoff{}, summarize(all), false
+}
+
+func currentHandoffs(all []Handoff) []Handoff {
+	out := make([]Handoff, 0, len(all))
+	for _, item := range all {
+		if isConflictHandoff(item.HandoffID) || item.HandoffID == AutoHandoffID {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func isConflictHandoff(id string) bool {
+	const marker = "-conflict-"
+	i := strings.LastIndex(id, marker)
+	if i < 0 {
+		return false
+	}
+	suffix := id[i+len(marker):]
+	if suffix == "" {
+		return false
+	}
+	for _, r := range suffix {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func summarize(all []Handoff) []Handoff {
