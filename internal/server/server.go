@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/scopweb/mcp-go-context/internal/analyzer"
 	"github.com/scopweb/mcp-go-context/internal/buildinfo"
@@ -140,10 +141,18 @@ func (s *Server) handleRequest(ctx context.Context, req json.RawMessage) (json.R
 		result, err = s.handleToolsList()
 	case "tools/call":
 		result, err = s.handleToolCall(req)
-	case "notifications/initialized":
-		// Handle initialization notification (no response needed)
-		return nil, nil
+	case "ping", "logging/setLevel":
+		result = map[string]interface{}{}
+	case "prompts/list":
+		result = map[string]interface{}{"prompts": []interface{}{}}
+	case "resources/list":
+		result = map[string]interface{}{"resources": []interface{}{}}
+	case "resources/templates/list":
+		result = map[string]interface{}{"resourceTemplates": []interface{}{}}
 	default:
+		if strings.HasPrefix(baseReq.Method, "notifications/") || baseReq.ID == nil {
+			return nil, nil
+		}
 		return s.createErrorResponse(baseReq.ID, -32601, fmt.Sprintf("Method not found: %s", baseReq.Method))
 	}
 
@@ -189,42 +198,22 @@ func (s *Server) handleInitialize(id interface{}, protocolVersion string) (inter
 		"protocolVersion": protocolVersion,
 		"capabilities": map[string]interface{}{
 			"tools": map[string]bool{
-				"listChanged": true,
+				"listChanged": false,
 			},
 		},
 		"serverInfo": map[string]string{
 			"name":    "MCP Context Server",
 			"version": buildinfo.Version,
 		},
-		"instructions": `This server provides project context analysis and technical memory shared between coding clients on the same machine.
+		"instructions": `This server provides project context analysis and persistent technical memory shared across coding clients.
 
-CONTINUITY:
-1. At the start of substantive work, call resume-context with the working path.
-2. Treat files and Git as the source of truth. Use the handoff for objective, pending work and next step.
-3. Pass the same path to save-decision and remember-conversation so memories stay with that project.
-4. After a milestone, before switching clients, or before ending work, call save-handoff with expectedRevision.
-5. A CONFLICT result preserves both versions. Reconcile them; do not overwrite either.
-6. Promote only durable decisions. Do not promote transient handoffs.
+CONTINUITY (use at start of work):
+- Call resume-context with the repo path (depth=wake for brief or full).
+- Use save-handoff after milestones (pass expectedRevision).
+- Use save-decision for important choices (include reason + alternatives).
+- Later clients resume the same project state via resume-context + get-decisions + search-memory.
 
-MEMORY WORKFLOW:
-1. Record important decisions with save-decision, including reason and alternatives.
-2. Before ending complex work, call suggest-promotions.
-3. Use promote-memory for items that must survive cleanup.
-4. Later clients can retrieve them with resume-context, get-context and search-memory.
-
-Available tools:
-- analyze-project: Full project structure, languages, dependencies and key files.
-- get-context: Best entry point for most queries. Returns relevant code + memories for a topic (automatically handles cold-start).
-- changed-files-context: Gets context from recent git changes (very useful for understanding current work).
-- fetch-docs: Library documentation via Context7 with local fallback.
-- dependency-analysis: Project dependencies with recommendations.
-- remember-conversation: Store free-form important context with tags.
-- save-decision: Record a technical decision with structured metadata (decisionType, reason, alternatives). Preferred for architecture, fixes and conventions.
-- get-decisions: Retrieve decisions filtered by type or keyword.
-- search-memory: Full-text search across all memories with relevance + recency scoring. Use project="*" for cross-project search.
-- suggest-promotions: Analyzes existing memories and returns the best candidates to promote to long-term storage. Call this regularly before ending work sessions.
-- promote-memory: Marks a memory as high-value for persistent storage (the core of memory convergence).
-- get-promoted-memories: Lists only the memories that have been explicitly promoted for long-term retention.`,
+Files + Git are source of truth. Handoffs are for work state only (never promote them). Use suggest-promotions + promote-memory for durable items.`,
 	}, nil
 }
 
@@ -615,7 +604,6 @@ func (s *Server) registerTools() {
 		},
 		Handler: tools.MemoryStatsHandler,
 	})
-
 
 	s.tools.Register(&tools.Tool{
 		Name:        "save-handoff",

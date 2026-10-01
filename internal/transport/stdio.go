@@ -40,27 +40,33 @@ func (t *StdioTransport) Start(ctx context.Context, info ServerInfo, handler Req
 			msg, err := t.readMessage()
 			if err != nil {
 				if err == io.EOF {
+					fmt.Fprintln(os.Stderr, "stdio: stdin closed, exiting")
 					return nil
 				}
-				// Skip invalid messages, don't exit
+				// Skip invalid messages, don't exit (log to stderr for debug)
+				fmt.Fprintf(os.Stderr, "stdio read error (continuing): %v\n", err)
 				continue
 			}
 
-			// Handle message
-			response, err := handler(ctx, msg)
-			if err != nil {
-				// Send error response
-				t.sendErrorResponse(err, nil)
-				continue
-			}
-
-			// Send response if there is one
-			if response != nil {
-				if err := t.sendMessage(response); err != nil {
-					// Log error but continue
-					continue
+			// Handle message with panic recovery to keep server alive
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						fmt.Fprintf(os.Stderr, "panic in handler: %v\n", r)
+						t.sendErrorResponse(fmt.Errorf("internal panic: %v", r), nil)
+					}
+				}()
+				response, err := handler(ctx, msg)
+				if err != nil {
+					t.sendErrorResponse(err, nil)
+					return
 				}
-			}
+				if response != nil {
+					if err := t.sendMessage(response); err != nil {
+						fmt.Fprintf(os.Stderr, "stdio send error: %v\n", err)
+					}
+				}
+			}()
 		}
 	}
 }

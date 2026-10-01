@@ -33,9 +33,10 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Setup logging
-	if !*verbose {
-		log.SetOutput(os.Stderr)
+	// stdio transport owns stdout. Logs always go to stderr, including --verbose.
+	log.SetOutput(os.Stderr)
+	if *verbose {
+		log.SetFlags(log.LstdFlags | log.Lshortfile)
 	}
 
 	// Load configuration
